@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     name: "[BUILD]"
-    uses: faccomichele/utils-n-scripts/.github/workflows/lambda-build.yml@main
+    uses: faccomichele-org/gha-reusables/.github/workflows/lambda-build.yml@main
     with:
       working-directory: './lambdas'
     secrets: inherit
@@ -25,7 +25,7 @@ jobs:
   dev:
     needs: build
     name: "[DEV]"
-    uses: faccomichele/utils-n-scripts/.github/workflows/terraform-run.yml@main
+    uses: faccomichele-org/gha-reusables/.github/workflows/terraform-run.yml@main
     with:
       environment: 'dev'
       region: 'eu-central-1'
