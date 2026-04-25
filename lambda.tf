@@ -1,30 +1,24 @@
-# Zip the Lambda source trees at plan/apply time
-data "archive_file" "auto_fix" {
-  type        = "zip"
-  source_dir  = "${path.module}/lambdas/auto_fix"
-  output_path = "${path.module}/dist/auto_fix.zip"
-}
-
-data "archive_file" "github_issue" {
-  type        = "zip"
-  source_dir  = "${path.module}/lambdas/github_issue"
-  output_path = "${path.module}/dist/github_issue.zip"
-}
-
 # ── Lambda: auto-fix ─────────────────────────────────────────────────────────
 
 resource "aws_cloudwatch_log_group" "auto_fix" {
-  name              = "/aws/lambda/${var.project_name}-auto-fix"
-  retention_in_days = 14
+  name              = "/aws/lambda/${local.project_name}-auto-fix-${local.environment}"
+  retention_in_days = local.log_retention_in_days
+
+  tags = merge(local.tags,
+    {
+      Name = "/aws/lambda/${local.project_name}-auto-fix-${local.environment}"
+      File = "lambda.tf"
+    }
+  )
 }
 
 resource "aws_lambda_function" "auto_fix" {
-  function_name    = "${var.project_name}-auto-fix"
-  filename         = data.archive_file.auto_fix.output_path
-  source_code_hash = data.archive_file.auto_fix.output_base64sha256
+  function_name    = "${local.project_name}-auto-fix-${local.environment}"
+  filename         = "${path.module}/lambdas/auto_fix.zip"
+  source_code_hash = fileexists("${path.module}/lambdas/auto_fix.zip") ? filebase64sha256("${path.module}/lambdas/auto_fix.zip") : null
   role             = aws_iam_role.lambda_auto_fix.arn
   handler          = "handler.lambda_handler"
-  runtime          = "python3.12"
+  runtime          = local.python_runtime
   timeout          = 60
 
   environment {
@@ -34,29 +28,50 @@ resource "aws_lambda_function" "auto_fix" {
   }
 
   depends_on = [aws_cloudwatch_log_group.auto_fix]
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-auto-fix-${local.environment}"
+      File = "lambda.tf"
+    }
+  )
 }
 
 # ── Lambda: github-issue ──────────────────────────────────────────────────────
 
 resource "aws_cloudwatch_log_group" "github_issue" {
-  name              = "/aws/lambda/${var.project_name}-github-issue"
-  retention_in_days = 14
+  name              = "/aws/lambda/${local.project_name}-github-issue-${local.environment}"
+  retention_in_days = local.log_retention_in_days
+
+  tags = merge(local.tags,
+    {
+      Name = "/aws/lambda/${local.project_name}-github-issue-${local.environment}"
+      File = "lambda.tf"
+    }
+  )
 }
 
 resource "aws_lambda_function" "github_issue" {
-  function_name    = "${var.project_name}-github-issue"
-  filename         = data.archive_file.github_issue.output_path
-  source_code_hash = data.archive_file.github_issue.output_base64sha256
+  function_name    = "${local.project_name}-github-issue-${local.environment}"
+  filename         = "${path.module}/lambdas/github_issue.zip"
+  source_code_hash = fileexists("${path.module}/lambdas/github_issue.zip") ? filebase64sha256("${path.module}/lambdas/github_issue.zip") : null
   role             = aws_iam_role.lambda_github_issue.arn
   handler          = "handler.lambda_handler"
-  runtime          = "python3.12"
+  runtime          = local.python_runtime
   timeout          = 30
 
   environment {
     variables = {
-      GITHUB_TOKEN_SSM_PATH = var.github_token_ssm_path
+      GITHUB_TOKEN_SSM_PATH = local.github_token_ssm_path
     }
   }
 
   depends_on = [aws_cloudwatch_log_group.github_issue]
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-github-issue-${local.environment}"
+      File = "lambda.tf"
+    }
+  )
 }

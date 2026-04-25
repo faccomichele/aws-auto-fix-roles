@@ -1,0 +1,34 @@
+# This triggers on all merged PRs into main
+
+name: Main - Cleanup/Destroy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  pull-requests: write
+  contents: read
+      
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: "[BUILD]"
+    uses: faccomichele/utils-n-scripts/.github/workflows/lambda-build.yml@main
+    with:
+      working-directory: './lambdas'
+    secrets: inherit
+  
+  dev:
+    needs: build
+    name: "[DEV]"
+    uses: faccomichele/utils-n-scripts/.github/workflows/terraform-run.yml@main
+    with:
+      environment: 'dev'
+      region: 'eu-central-1'
+      working-directory: '.'
+      action: 'destroy'
+    secrets: inherit

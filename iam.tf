@@ -3,7 +3,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 resource "aws_iam_role" "lambda_auto_fix" {
-  name = "${var.project_name}-lambda-auto-fix"
+  name = "${local.project_name}-lambda-auto-fix-${local.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -13,10 +13,17 @@ resource "aws_iam_role" "lambda_auto_fix" {
       Action    = "sts:AssumeRole"
     }]
   })
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-lambda-auto-fix-${local.environment}"
+      File = "iam.tf"
+    }
+  )
 }
 
 resource "aws_iam_role_policy" "lambda_auto_fix" {
-  name = "${var.project_name}-lambda-auto-fix"
+  name = "${local.project_name}-lambda-auto-fix-${local.environment}"
   role = aws_iam_role.lambda_auto_fix.id
 
   policy = jsonencode({
@@ -66,7 +73,7 @@ resource "aws_iam_role_policy" "lambda_auto_fix" {
 # ──────────────────────────────────────────────────────────────────────────────
 
 resource "aws_iam_role" "lambda_github_issue" {
-  name = "${var.project_name}-lambda-github-issue"
+  name = "${local.project_name}-lambda-github-issue-${local.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -76,10 +83,17 @@ resource "aws_iam_role" "lambda_github_issue" {
       Action    = "sts:AssumeRole"
     }]
   })
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-lambda-github-issue-${local.environment}"
+      File = "iam.tf"
+    }
+  )
 }
 
 resource "aws_iam_role_policy" "lambda_github_issue" {
-  name = "${var.project_name}-lambda-github-issue"
+  name = "${local.project_name}-lambda-github-issue-${local.environment}"
   role = aws_iam_role.lambda_github_issue.id
 
   policy = jsonencode({
@@ -99,7 +113,7 @@ resource "aws_iam_role_policy" "lambda_github_issue" {
         Sid      = "AllowSSMGetGitHubToken"
         Effect   = "Allow"
         Action   = ["ssm:GetParameter"]
-        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.github_token_ssm_path}"
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.github_token_ssm_path}"
       },
     ]
   })
@@ -110,7 +124,7 @@ resource "aws_iam_role_policy" "lambda_github_issue" {
 # ──────────────────────────────────────────────────────────────────────────────
 
 resource "aws_iam_role" "step_functions" {
-  name = "${var.project_name}-step-functions"
+  name = "${local.project_name}-step-functions-${local.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -120,10 +134,17 @@ resource "aws_iam_role" "step_functions" {
       Action    = "sts:AssumeRole"
     }]
   })
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-step-functions-${local.environment}"
+      File = "iam.tf"
+    }
+  )
 }
 
 resource "aws_iam_role_policy" "step_functions" {
-  name = "${var.project_name}-step-functions"
+  name = "${local.project_name}-step-functions-${local.environment}"
   role = aws_iam_role.step_functions.id
 
   policy = jsonencode({
@@ -178,7 +199,7 @@ resource "aws_iam_role_policy" "step_functions" {
 # ──────────────────────────────────────────────────────────────────────────────
 
 resource "aws_iam_role" "eventbridge" {
-  name = "${var.project_name}-eventbridge"
+  name = "${local.project_name}-eventbridge-${local.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -188,10 +209,17 @@ resource "aws_iam_role" "eventbridge" {
       Action    = "sts:AssumeRole"
     }]
   })
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-eventbridge-${local.environment}"
+      File = "iam.tf"
+    }
+  )
 }
 
 resource "aws_iam_role_policy" "eventbridge" {
-  name = "${var.project_name}-eventbridge"
+  name = "${local.project_name}-eventbridge-${local.environment}"
   role = aws_iam_role.eventbridge.id
 
   policy = jsonencode({
