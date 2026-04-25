@@ -179,6 +179,7 @@ Resources:
                   - states:TagResource
                   - states:UntagResource
                   - states:ListTagsForResource
+                  - states:ListStateMachineVersions
                 Resource:
                   - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ProjectName}-*'
 
