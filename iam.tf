@@ -1,0 +1,205 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Lambda – auto-fix
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "aws_iam_role" "lambda_auto_fix" {
+  name = "${var.project_name}-lambda-auto-fix"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "lambda_auto_fix" {
+  name = "${var.project_name}-lambda-auto-fix"
+  role = aws_iam_role.lambda_auto_fix.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowCloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "${aws_cloudwatch_log_group.auto_fix.arn}:*"
+      },
+      {
+        Sid    = "AllowGetRole"
+        Effect = "Allow"
+        Action = ["iam:GetRole"]
+        # Scoped to roles in this account only
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+      },
+      {
+        Sid    = "AllowCreateAutoCorrectPolicy"
+        Effect = "Allow"
+        Action = ["iam:CreatePolicy"]
+        # Restrict creation to the auto-correction naming prefix
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/auto-correction-*"
+      },
+      {
+        Sid      = "AllowAttachAutoCorrectPolicy"
+        Effect   = "Allow"
+        Action   = ["iam:AttachRolePolicy"]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+        Condition = {
+          ArnLike = {
+            "iam:PolicyARN" = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/auto-correction-*"
+          }
+        }
+      },
+    ]
+  })
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Lambda – github-issue
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "aws_iam_role" "lambda_github_issue" {
+  name = "${var.project_name}-lambda-github-issue"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "lambda_github_issue" {
+  name = "${var.project_name}-lambda-github-issue"
+  role = aws_iam_role.lambda_github_issue.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowCloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "${aws_cloudwatch_log_group.github_issue.arn}:*"
+      },
+      {
+        Sid      = "AllowSSMGetGitHubToken"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.github_token_ssm_path}"
+      },
+    ]
+  })
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Step Functions
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "aws_iam_role" "step_functions" {
+  name = "${var.project_name}-step-functions"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "states.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "step_functions" {
+  name = "${var.project_name}-step-functions"
+  role = aws_iam_role.step_functions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["lambda:InvokeFunction"]
+        Resource = [
+          aws_lambda_function.auto_fix.arn,
+          aws_lambda_function.github_issue.arn,
+        ]
+      },
+      {
+        Sid    = "AllowSFNCloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogDelivery",
+          "logs:GetLogDelivery",
+          "logs:UpdateLogDelivery",
+          "logs:DeleteLogDelivery",
+          "logs:ListLogDeliveries",
+          "logs:PutLogEvents",
+          "logs:PutResourcePolicy",
+          "logs:DescribeResourcePolicies",
+          "logs:DescribeLogGroups",
+        ]
+        # DescribeLogGroups and DescribeResourcePolicies require wildcard;
+        # PutLogEvents is scoped to the SFN log group.
+        Resource = [
+          aws_cloudwatch_log_group.sfn.arn,
+          "${aws_cloudwatch_log_group.sfn.arn}:*",
+          "*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords",
+          "xray:GetSamplingRules",
+          "xray:GetSamplingTargets",
+        ]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# EventBridge
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "aws_iam_role" "eventbridge" {
+  name = "${var.project_name}-eventbridge"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "events.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "eventbridge" {
+  name = "${var.project_name}-eventbridge"
+  role = aws_iam_role.eventbridge.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["states:StartExecution"]
+      Resource = aws_sfn_state_machine.auto_fix.arn
+    }]
+  })
+}
