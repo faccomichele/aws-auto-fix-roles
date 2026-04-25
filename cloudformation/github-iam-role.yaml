@@ -149,6 +149,7 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-*'
                   - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/states/${ProjectName}/*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group::log-stream:*'
 
               # ── EventBridge: manage rules and targets from eventbridge.tf ─
               - Sid: EventBridgeManagement
