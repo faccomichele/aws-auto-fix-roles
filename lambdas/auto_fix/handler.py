@@ -19,20 +19,18 @@ Happy-path return value
 If nothing was changed the function returns ``{}``.
 """
 
+import os, re
 import json
-import logging
-import os
-import re
-from datetime import datetime, timezone
-
 import boto3
+import logging
+from datetime import datetime, timezone
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 OIDC_PROVIDER_URL: str = os.environ.get(
     "OIDC_PROVIDER_URL",
-    "token.actions.githubusercontent.com",
+    "MISSING_OIDC_PROVIDER_URL!",  # e.g. "token.actions.githubusercontent.com"
 )
 
 iam = boto3.client("iam")

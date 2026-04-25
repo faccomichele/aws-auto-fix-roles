@@ -18,20 +18,19 @@ Behaviour
 3. Returns ``{"status": "success", "issue_url": str}`` on success.
 """
 
-import json
-import logging
 import os
+import json
+import boto3
+import logging
 import urllib.error
 import urllib.request
-
-import boto3
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 GITHUB_TOKEN_SSM_PATH: str = os.environ.get(
     "GITHUB_TOKEN_SSM_PATH",
-    "/auto-roles-fix/github-token",
+    "MISSING_GITHUB_TOKEN_SSM_PATH!",  # e.g. "/aws-auto-roles-fix/dev/github-token"
 )
 
 # GitHub REST API version – see https://docs.github.com/en/rest/overview/api-versions

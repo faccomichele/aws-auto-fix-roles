@@ -1,10 +1,10 @@
 resource "aws_cloudwatch_log_group" "sfn" {
-  name              = "/aws/states/${var.project_name}"
-  retention_in_days = 14
+  name              = "/aws/states/${local.project_name}/${local.environment}"
+  retention_in_days = local.log_retention_in_days
 }
 
 resource "aws_sfn_state_machine" "auto_fix" {
-  name     = "${var.project_name}-state-machine"
+  name     = "${local.project_name}-state-machine-${local.environment}"
   role_arn = aws_iam_role.step_functions.arn
 
   logging_configuration {
@@ -85,4 +85,10 @@ resource "aws_sfn_state_machine" "auto_fix" {
       }
     }
   })
+
+  tags = merge(local.tags,
+    {
+      File = "step_functions.tf"
+    }
+  )
 }
