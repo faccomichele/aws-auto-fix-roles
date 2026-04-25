@@ -195,7 +195,7 @@ Resources:
                   - ssm:RemoveTagsFromResource
                   - ssm:ListTagsForResource
                 Resource:
-                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/*'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${Organization}/${ProjectName}/*'
       Tags:
         - Key: Project
           Value: !Ref ProjectName
