@@ -19,6 +19,8 @@ jobs:
     name: "[BUILD]"
     uses: faccomichele-org/gha-reusables/.github/workflows/lambda-build.yml@main
     with:
+      environment: 'dev'
+      region: 'eu-central-1'
       working-directory: './lambdas'
     secrets: inherit
   

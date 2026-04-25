@@ -16,13 +16,15 @@ permissions:
 concurrency:
   group: pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-  
+
 jobs:
   build:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true) }}
     name: "[BUILD]"
     uses: faccomichele-org/gha-reusables/.github/workflows/lambda-build.yml@main
     with:
+      environment: 'dev'
+      region: 'eu-central-1'
       working-directory: './lambdas'
     secrets: inherit
   
