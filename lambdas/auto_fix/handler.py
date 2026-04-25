@@ -94,6 +94,15 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
 
     # ── Build the allow statement for the denied action ───────────────────────
     action = _build_iam_action(detail.get("eventSource", ""), detail.get("eventName", ""))
+    if not action:
+        logger.warning(
+            "Could not determine IAM action from eventSource='%s' eventName='%s' – "
+            "skipping to avoid creating an overly-permissive wildcard policy",
+            detail.get("eventSource", ""),
+            detail.get("eventName", ""),
+        )
+        return {}
+
     resource_arns = _extract_resource_arns(detail.get("resources", []))
 
     # ── Create a uniquely-named IAM policy ────────────────────────────────────
@@ -106,8 +115,8 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
             {
                 "Sid": "AutoCorrectionStatement",
                 "Effect": "Allow",
-                "Action": [action] if action else ["*"],
-                "Resource": resource_arns if resource_arns else ["*"],
+                "Action": [action],
+                "Resource": resource_arns,
             }
         ],
     }
@@ -199,6 +208,16 @@ def _build_iam_action(event_source: str, event_name: str) -> str:
 
 
 def _extract_resource_arns(resources: list) -> list:
-    """Pull ARNs from the CloudTrail ``resources`` array."""
+    """Pull ARNs from the CloudTrail ``resources`` array.
+
+    Falls back to ``["*"]`` when no ARNs are available – a security warning
+    is logged in that case so operators can review the resulting policy.
+    """
     arns = [r["ARN"] for r in resources if r.get("ARN")]
-    return arns if arns else ["*"]
+    if not arns:
+        logger.warning(
+            "No resource ARNs found in CloudTrail event; the remediation policy "
+            "will use a wildcard resource ('*'). Please review the created policy."
+        )
+        return ["*"]
+    return arns

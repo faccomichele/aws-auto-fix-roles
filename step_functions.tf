@@ -8,7 +8,7 @@ resource "aws_sfn_state_machine" "auto_fix" {
   role_arn = aws_iam_role.step_functions.arn
 
   logging_configuration {
-    level                  = "ERROR"
+    level                  = "ALL"
     include_execution_data = true
     log_destination        = "${aws_cloudwatch_log_group.sfn.arn}:*"
   }

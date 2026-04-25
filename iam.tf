@@ -23,22 +23,39 @@ resource "aws_iam_role_policy" "lambda_auto_fix" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "AllowCloudWatchLogs"
         Effect = "Allow"
         Action = [
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents",
         ]
-        Resource = "arn:aws:logs:*:*:*"
+        Resource = "${aws_cloudwatch_log_group.auto_fix.arn}:*"
       },
       {
+        Sid    = "AllowGetRole"
         Effect = "Allow"
-        Action = [
-          "iam:GetRole",
-          "iam:CreatePolicy",
-          "iam:AttachRolePolicy",
-        ]
-        Resource = "*"
+        Action = ["iam:GetRole"]
+        # Scoped to roles in this account only
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+      },
+      {
+        Sid    = "AllowCreateAutoCorrectPolicy"
+        Effect = "Allow"
+        Action = ["iam:CreatePolicy"]
+        # Restrict creation to the auto-correction naming prefix
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/auto-correction-*"
+      },
+      {
+        Sid      = "AllowAttachAutoCorrectPolicy"
+        Effect   = "Allow"
+        Action   = ["iam:AttachRolePolicy"]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+        Condition = {
+          ArnLike = {
+            "iam:PolicyARN" = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/auto-correction-*"
+          }
+        }
       },
     ]
   })
@@ -69,15 +86,17 @@ resource "aws_iam_role_policy" "lambda_github_issue" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "AllowCloudWatchLogs"
         Effect = "Allow"
         Action = [
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents",
         ]
-        Resource = "arn:aws:logs:*:*:*"
+        Resource = "${aws_cloudwatch_log_group.github_issue.arn}:*"
       },
       {
+        Sid      = "AllowSSMGetGitHubToken"
         Effect   = "Allow"
         Action   = ["ssm:GetParameter"]
         Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.github_token_ssm_path}"
@@ -119,6 +138,7 @@ resource "aws_iam_role_policy" "step_functions" {
         ]
       },
       {
+        Sid    = "AllowSFNCloudWatchLogs"
         Effect = "Allow"
         Action = [
           "logs:CreateLogDelivery",
@@ -131,7 +151,13 @@ resource "aws_iam_role_policy" "step_functions" {
           "logs:DescribeResourcePolicies",
           "logs:DescribeLogGroups",
         ]
-        Resource = "*"
+        # DescribeLogGroups and DescribeResourcePolicies require wildcard;
+        # PutLogEvents is scoped to the SFN log group.
+        Resource = [
+          aws_cloudwatch_log_group.sfn.arn,
+          "${aws_cloudwatch_log_group.sfn.arn}:*",
+          "*",
+        ]
       },
       {
         Effect = "Allow"

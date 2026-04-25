@@ -5,6 +5,11 @@
 dist/
 *.zip
 
+# Python byte-code caches
+__pycache__/
+*.pyc
+*.pyo
+
 # .tfstate files
 *.tfstate
 *.tfstate.*

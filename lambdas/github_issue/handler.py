@@ -34,6 +34,9 @@ GITHUB_TOKEN_SSM_PATH: str = os.environ.get(
     "/auto-roles-fix/github-token",
 )
 
+# GitHub REST API version – see https://docs.github.com/en/rest/overview/api-versions
+GITHUB_API_VERSION = "2022-11-28"
+
 ssm = boto3.client("ssm")
 
 
@@ -169,7 +172,7 @@ def _create_github_issue(
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
-        "X-GitHub-Api-Version": "2022-11-28",
+        "X-GitHub-Api-Version": GITHUB_API_VERSION,
     }
 
     req = urllib.request.Request(url=url, data=payload, headers=headers, method="POST")
