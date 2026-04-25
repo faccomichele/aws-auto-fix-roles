@@ -182,6 +182,21 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ProjectName}-*'
 
+              # Allow validating any state machine definition in the region
+              - Sid: StepFunctionsValidateAny
+                Effect: Allow
+                Action:
+                  - states:ValidateStateMachineDefinition
+                Resource:
+                  - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*'
+
+              # DescribeParameters is not resource-level scoped; allow on all resources
+              - Sid: SSMDescribeParameters
+                Effect: Allow
+                Action:
+                  - ssm:DescribeParameters
+                Resource: '*'
+
               # ── SSM: manage the GitHub token parameter from ssm.tf ────────
               - Sid: SSMParameterManagement
                 Effect: Allow
@@ -189,7 +204,6 @@ Resources:
                   - ssm:PutParameter
                   - ssm:GetParameter
                   - ssm:GetParameters
-                  - ssm:DescribeParameters
                   - ssm:DeleteParameter
                   - ssm:AddTagsToResource
                   - ssm:RemoveTagsFromResource
