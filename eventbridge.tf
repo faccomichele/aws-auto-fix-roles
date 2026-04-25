@@ -10,6 +10,13 @@ resource "aws_cloudwatch_event_rule" "cloudtrail_access_denied" {
       errorCode = ["AccessDenied", "Client.UnauthorizedOperation"]
     }
   })
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-cloudtrail-access-denied-${local.environment}"
+      File = "eventbridge.tf"
+    }
+  )
 }
 
 resource "aws_cloudwatch_event_target" "step_functions" {

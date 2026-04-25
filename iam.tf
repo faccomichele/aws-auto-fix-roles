@@ -13,6 +13,13 @@ resource "aws_iam_role" "lambda_auto_fix" {
       Action    = "sts:AssumeRole"
     }]
   })
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-lambda-auto-fix-${local.environment}"
+      File = "iam.tf"
+    }
+  )
 }
 
 resource "aws_iam_role_policy" "lambda_auto_fix" {
@@ -76,6 +83,13 @@ resource "aws_iam_role" "lambda_github_issue" {
       Action    = "sts:AssumeRole"
     }]
   })
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-lambda-github-issue-${local.environment}"
+      File = "iam.tf"
+    }
+  )
 }
 
 resource "aws_iam_role_policy" "lambda_github_issue" {
@@ -120,6 +134,13 @@ resource "aws_iam_role" "step_functions" {
       Action    = "sts:AssumeRole"
     }]
   })
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-step-functions-${local.environment}"
+      File = "iam.tf"
+    }
+  )
 }
 
 resource "aws_iam_role_policy" "step_functions" {
@@ -188,6 +209,13 @@ resource "aws_iam_role" "eventbridge" {
       Action    = "sts:AssumeRole"
     }]
   })
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-eventbridge-${local.environment}"
+      File = "iam.tf"
+    }
+  )
 }
 
 resource "aws_iam_role_policy" "eventbridge" {

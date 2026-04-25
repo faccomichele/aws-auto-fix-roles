@@ -3,6 +3,13 @@
 resource "aws_cloudwatch_log_group" "auto_fix" {
   name              = "/aws/lambda/${local.project_name}-auto-fix-${local.environment}"
   retention_in_days = local.log_retention_in_days
+
+  tags = merge(local.tags,
+    {
+      Name = "/aws/lambda/${local.project_name}-auto-fix-${local.environment}"
+      File = "lambda.tf"
+    }
+  )
 }
 
 resource "aws_lambda_function" "auto_fix" {
@@ -21,6 +28,13 @@ resource "aws_lambda_function" "auto_fix" {
   }
 
   depends_on = [aws_cloudwatch_log_group.auto_fix]
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-auto-fix-${local.environment}"
+      File = "lambda.tf"
+    }
+  )
 }
 
 # ── Lambda: github-issue ──────────────────────────────────────────────────────
@@ -28,6 +42,13 @@ resource "aws_lambda_function" "auto_fix" {
 resource "aws_cloudwatch_log_group" "github_issue" {
   name              = "/aws/lambda/${local.project_name}-github-issue-${local.environment}"
   retention_in_days = local.log_retention_in_days
+
+  tags = merge(local.tags,
+    {
+      Name = "/aws/lambda/${local.project_name}-github-issue-${local.environment}"
+      File = "lambda.tf"
+    }
+  )
 }
 
 resource "aws_lambda_function" "github_issue" {
@@ -46,4 +67,11 @@ resource "aws_lambda_function" "github_issue" {
   }
 
   depends_on = [aws_cloudwatch_log_group.github_issue]
+
+  tags = merge(local.tags,
+    {
+      Name = "${local.project_name}-github-issue-${local.environment}"
+      File = "lambda.tf"
+    }
+  )
 }

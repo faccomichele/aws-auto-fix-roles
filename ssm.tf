@@ -11,4 +11,11 @@ resource "aws_ssm_parameter" "github_token" {
   lifecycle {
     ignore_changes = [value]
   }
+
+  tags = merge(local.tags,
+    {
+      Name = local.github_token_ssm_path
+      File = "ssm.tf"
+    }
+  )
 }

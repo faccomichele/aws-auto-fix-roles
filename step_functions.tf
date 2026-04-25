@@ -1,6 +1,13 @@
 resource "aws_cloudwatch_log_group" "sfn" {
   name              = "/aws/states/${local.project_name}/${local.environment}"
   retention_in_days = local.log_retention_in_days
+
+  tags = merge(local.tags,
+    {
+      Name = "/aws/states/${local.project_name}/${local.environment}"
+      File = "step_functions.tf"
+    }
+  )
 }
 
 resource "aws_sfn_state_machine" "auto_fix" {
@@ -88,6 +95,7 @@ resource "aws_sfn_state_machine" "auto_fix" {
 
   tags = merge(local.tags,
     {
+      Name = "${local.project_name}-state-machine-${local.environment}"
       File = "step_functions.tf"
     }
   )
