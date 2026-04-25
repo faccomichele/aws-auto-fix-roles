@@ -238,7 +238,7 @@ Outputs:
         - - !FindInMap [EnvironmentMap, !Ref Environment, Upper]
           - '_ROLE_SECRET = '
           - Fn::Select:
-              - 8
+              - 9
               - Fn::Split:
                   - "-"
                   - !GetAtt GHARole.Arn
