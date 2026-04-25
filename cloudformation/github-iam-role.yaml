@@ -55,16 +55,6 @@ Parameters:
       - prod
     Default: dev
 
-# Mapping from lower to upper as CFT does not have intrinsic functions for string case conversion
-Mappings:
-  EnvironmentMap:
-    dev:
-      Upper: DEV
-    stg:
-      Upper: STG
-    prod:
-      Upper: PROD
-
 Resources:
   # IAM role for GitHub Actions (repository-specific)
   GHARole:
@@ -90,6 +80,7 @@ Resources:
         # REQUIRED: SSM parameter read policy to retrieve Terraform backend configuration
         - !Sub 'arn:aws:iam::${AWS::AccountId}:policy/terraform-core-aws-tf-access-${Environment}'
         - !Sub 'arn:aws:iam::${AWS::AccountId}:policy/terraform-core-aws-ssm-read-${Environment}'
+        - !Sub 'arn:aws:iam::${AWS::AccountId}:policy/terraform-core-aws-s3-artifacts-access-${Environment}'
       # Inline policy with required Terraform permissions
       Policies:
         - PolicyName: TerraformDeploymentPolicy
@@ -227,16 +218,16 @@ Outputs:
   AwsId:
     Value:
       Fn::Join:
-        - ''
-        - - !FindInMap [EnvironmentMap, !Ref Environment, Upper]
-          - '_AWS_ID = '
+        - ' '
+        - - 'ACCOUNT_ID'
+          - '='
           - !Ref 'AWS::AccountId'
   RoleSecret:
     Value:
       Fn::Join:
-        - ''
-        - - !FindInMap [EnvironmentMap, !Ref Environment, Upper]
-          - '_ROLE_SECRET = '
+        - ' '
+        - - 'ROLE_SECRET'
+          - "="
           - Fn::Select:
               - 9
               - Fn::Split:
