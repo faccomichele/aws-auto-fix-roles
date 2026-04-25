@@ -96,31 +96,113 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Sid: ECRManagement
+              # ── IAM: manage roles and inline policies created by iam.tf ──────
+              - Sid: IAMRoleManagement
                 Effect: Allow
                 Action:
-                  - ecr:CreateRepository
-                  - ecr:DescribeRepositories
-                  - ecr:DeleteRepository
-                  - ecr:ListTagsForResource
-                  - ecr:TagResource
-                  - ecr:UntagResource
-                  - ecr:PutImageTagMutability
-                  - ecr:SetRepositoryPolicy
+                  - iam:CreateRole
+                  - iam:GetRole
+                  - iam:DeleteRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:ListRoleTags
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
                 Resource:
-                  - !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ProjectName}*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*'
 
-              - Sid: ECRImagePush
+              # PassRole is required when Terraform creates Lambda functions,
+              # the Step Functions state machine, and the EventBridge rule target.
+              - Sid: IAMPassRole
                 Effect: Allow
                 Action:
-                  - ecr:GetAuthorizationToken
-                  - ecr:BatchCheckLayerAvailability
-                  - ecr:CompleteLayerUpload
-                  - ecr:InitiateLayerUpload
-                  - ecr:UploadLayerPart
-                  - ecr:PutImage
-                  - ecr:BatchGetImage
-                Resource: '*'
+                  - iam:PassRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*'
+
+              # ── Lambda: manage functions created by lambda.tf ─────────────
+              - Sid: LambdaManagement
+                Effect: Allow
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:GetFunction
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:DeleteFunction
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:ListTags
+                  - lambda:GetFunctionCodeSigningConfig
+                  - lambda:GetPolicy
+                Resource:
+                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectName}-*'
+
+              # ── CloudWatch Logs: manage log groups for Lambda and SFN ─────
+              - Sid: CloudWatchLogsManagement
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:DeleteLogGroup
+                  - logs:PutRetentionPolicy
+                  - logs:DeleteRetentionPolicy
+                  - logs:TagLogGroup
+                  - logs:UntagLogGroup
+                  - logs:ListTagsLogGroup
+                  - logs:TagResource
+                  - logs:UntagResource
+                  - logs:ListTagsForResource
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/states/${ProjectName}/*'
+
+              # ── EventBridge: manage rules and targets from eventbridge.tf ─
+              - Sid: EventBridgeManagement
+                Effect: Allow
+                Action:
+                  - events:PutRule
+                  - events:DescribeRule
+                  - events:DeleteRule
+                  - events:TagResource
+                  - events:UntagResource
+                  - events:ListTagsForResource
+                  - events:PutTargets
+                  - events:RemoveTargets
+                  - events:ListTargetsByRule
+                Resource:
+                  - !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/${ProjectName}-*'
+
+              # ── Step Functions: manage state machine from step_functions.tf
+              - Sid: StepFunctionsManagement
+                Effect: Allow
+                Action:
+                  - states:CreateStateMachine
+                  - states:DescribeStateMachine
+                  - states:UpdateStateMachine
+                  - states:DeleteStateMachine
+                  - states:TagResource
+                  - states:UntagResource
+                  - states:ListTagsForResource
+                Resource:
+                  - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ProjectName}-*'
+
+              # ── SSM: manage the GitHub token parameter from ssm.tf ────────
+              - Sid: SSMParameterManagement
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:DescribeParameters
+                  - ssm:DeleteParameter
+                  - ssm:AddTagsToResource
+                  - ssm:RemoveTagsFromResource
+                  - ssm:ListTagsForResource
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/*'
       Tags:
         - Key: Project
           Value: !Ref ProjectName
