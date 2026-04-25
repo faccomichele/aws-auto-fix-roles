@@ -7,6 +7,11 @@ on:
     types: [closed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      full-rebuild:
+        description: 'Perform a full rebuild (including Lambda packaging) instead of just applying the changes. Use this if you want to deploy changes to the Lambda code without making any changes to the Terraform configuration.'
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -16,7 +21,7 @@ permissions:
 concurrency:
   group: pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
+  
 jobs:
   build:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true) }}
@@ -26,6 +31,7 @@ jobs:
       environment: 'dev'
       region: 'eu-central-1'
       working-directory: './lambdas'
+      full-rebuild: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.full-rebuild == 'true' }}
     secrets: inherit
   
   dev:
