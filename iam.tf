@@ -64,6 +64,15 @@ resource "aws_iam_role_policy" "lambda_auto_fix" {
           }
         }
       },
+      {
+        Sid    = "AllowSSMAutoFixParameters"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:PutParameter",
+        ]
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/${local.organization}/${local.project_name}/${local.environment}/auto-fix/*"
+      },
     ]
   })
 }
