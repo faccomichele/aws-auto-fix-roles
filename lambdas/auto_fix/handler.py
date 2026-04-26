@@ -33,7 +33,13 @@ OIDC_PROVIDER_URL: str = os.environ.get(
     "MISSING_OIDC_PROVIDER_URL!",  # e.g. "token.actions.githubusercontent.com"
 )
 
+SSM_PATH_PREFIX: str = os.environ.get(
+    "SSM_PATH_PREFIX",
+    "MISSING_SSM_PATH_PREFIX!",  # e.g. "/org/project/env/auto-fix/"
+)
+
 iam = boto3.client("iam")
+ssm = boto3.client("ssm")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -81,6 +87,14 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
     if not _is_github_actions_oidc_role(role_name, expected_provider):
         logger.info(
             "Role '%s' does not use the GitHub Actions OIDC trust policy – skipping",
+            role_name,
+        )
+        return {}
+
+    # ── Auto-fix enabled check ────────────────────────────────────────────────
+    if not _is_auto_fix_enabled(role_name):
+        logger.info(
+            "Auto-fix is disabled for role '%s' – skipping",
             role_name,
         )
         return {}
@@ -219,3 +233,38 @@ def _extract_resource_arns(resources: list) -> list:
         )
         return ["*"]
     return arns
+
+
+def _is_auto_fix_enabled(role_name: str) -> bool:
+    """Return *True* iff the SSM parameter for this role permits auto-fix.
+
+    The parameter path is ``{SSM_PATH_PREFIX}{role_name}``.
+    If the parameter does not exist it is created with value ``'true'`` so that
+    auto-fix is opt-out rather than opt-in.
+    """
+    param_name = f"{SSM_PATH_PREFIX}{role_name}"
+    try:
+        response = ssm.get_parameter(Name=param_name)
+        value = response["Parameter"]["Value"].strip().lower()
+        return value == "true"
+    except ssm.exceptions.ParameterNotFound:
+        logger.info(
+            "SSM parameter '%s' not found – creating it with value 'true'",
+            param_name,
+        )
+        ssm.put_parameter(
+            Name=param_name,
+            Value="true",
+            Type="String",
+            Description=(
+                f"Controls whether auto-fix is enabled for IAM role '{role_name}'. "
+                "Set to 'false' to disable automatic remediation for this role."
+            ),
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "Failed to read or create SSM parameter '%s' – treating auto-fix as disabled",
+            param_name,
+        )
+        return False
