@@ -43,5 +43,5 @@ jobs:
       region: 'eu-central-1'
       working-directory: '.'
       lambda-working-directory: './lambdas'
-      action: 'plan'
+      action: 'apply'
     secrets: inherit

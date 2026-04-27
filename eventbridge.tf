@@ -7,14 +7,6 @@ resource "aws_cloudwatch_event_rule" "cloudtrail_access_denied" {
 
   event_pattern = jsonencode({
     "detail-type" = ["AWS API Call via CloudTrail"]
-    detail = {
-      errorCode = [
-        "AccessDenied",
-        "AccessDeniedException",
-        "UnauthorizedOperation",
-        "Client.UnauthorizedOperation"
-      ]
-    }
   })
 
   tags = merge(local.tags,
