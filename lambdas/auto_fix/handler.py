@@ -83,8 +83,13 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         f"arn:aws:iam::{account_id}:oidc-provider/{OIDC_PROVIDER_URL}"
     )
 
+    # ── Fetch trust policy once ───────────────────────────────────────────────
+    trust_policy = _get_role_trust_policy(role_name)
+    if trust_policy is None:
+        return {}
+
     # ── Safety check ─────────────────────────────────────────────────────────
-    if not _is_github_actions_oidc_role(role_name, expected_provider):
+    if not _is_github_actions_oidc_role(trust_policy, expected_provider):
         logger.info(
             "Role '%s' does not use the GitHub Actions OIDC trust policy – skipping",
             role_name,
@@ -99,10 +104,8 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         )
         return {}
 
-    # ── Extract repo name from OIDC sub claim ─────────────────────────────────
-    web_id_data = session_context.get("webIdFederationData", {})
-    sub_claim: str = web_id_data.get("attributes", {}).get("sub", "")
-    repo_name: str = _extract_repo_from_sub(sub_claim)
+    # ── Extract repo name from the role's trust policy sub condition ──────────
+    repo_name: str = _extract_repo_from_trust_policy(trust_policy)
 
     # ── Build the allow statement for the denied action ───────────────────────
     action = _build_iam_action(detail.get("eventSource", ""), detail.get("eventName", ""))
@@ -169,16 +172,19 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _is_github_actions_oidc_role(role_name: str, expected_provider: str) -> bool:
-    """Return *True* iff the role's trust policy allows sts:AssumeRoleWithWebIdentity
-    from the expected GitHub Actions OIDC provider ARN."""
+def _get_role_trust_policy(role_name: str) -> dict | None:
+    """Return the trust policy document for *role_name*, or *None* on failure."""
     try:
         response = iam.get_role(RoleName=role_name)
-        trust_policy: dict = response["Role"]["AssumeRolePolicyDocument"]
+        return response["Role"]["AssumeRolePolicyDocument"]
     except Exception:
         logger.exception("Failed to retrieve role '%s'", role_name)
-        return False
+        return None
 
+
+def _is_github_actions_oidc_role(trust_policy: dict, expected_provider: str) -> bool:
+    """Return *True* iff the trust policy allows sts:AssumeRoleWithWebIdentity
+    from the expected GitHub Actions OIDC provider ARN."""
     for statement in trust_policy.get("Statement", []):
         actions = statement.get("Action", [])
         if isinstance(actions, str):
@@ -197,17 +203,33 @@ def _is_github_actions_oidc_role(role_name: str, expected_provider: str) -> bool
     return False
 
 
-def _extract_repo_from_sub(sub_claim: str) -> str:
-    """Extract *owner/repo* from an OIDC ``sub`` claim.
+def _extract_repo_from_trust_policy(trust_policy: dict) -> str:
+    """Extract the repository name from the OIDC ``sub`` condition in the trust policy.
 
-    The claim format is ``repo:owner/repo-name:ref:refs/heads/main`` (or
-    ``repo:owner/repo-name:environment:prod``, etc.).
+    Looks for a condition key ``<OIDC_PROVIDER_URL>:sub`` whose value follows the
+    GitHub Actions format ``repo:owner/repo-name:*``.  Returns just the bare
+    repository name (e.g. ``aws-auto-fix-roles``), or an empty string when not found.
     """
-    match = re.match(r"repo:([^:]+/[^:]+):", sub_claim)
-    if match:
-        return match.group(1)
-    # Return the raw value if it cannot be parsed (safer than empty string)
-    return sub_claim
+    sub_key = f"{OIDC_PROVIDER_URL}:sub"
+    for statement in trust_policy.get("Statement", []):
+        actions = statement.get("Action", [])
+        if isinstance(actions, str):
+            actions = [actions]
+        if "sts:AssumeRoleWithWebIdentity" not in actions:
+            continue
+
+        for condition_op in statement.get("Condition", {}).values():
+            sub_value = condition_op.get(sub_key, "")
+            if not sub_value:
+                continue
+            # sub_value: "repo:owner/repo-name:*" – capture only the repo-name part
+            match = re.match(r"repo:[^/]+/([^:/]+)", sub_value)
+            if match:
+                return match.group(1)
+            logger.warning("Could not parse sub condition value '%s'", sub_value)
+
+    logger.warning("No '%s' sub condition found in trust policy", sub_key)
+    return ""
 
 
 def _build_iam_action(event_source: str, event_name: str) -> str:
