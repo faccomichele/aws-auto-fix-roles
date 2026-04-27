@@ -3,11 +3,17 @@
 resource "aws_cloudwatch_event_rule" "cloudtrail_access_denied" {
   name        = "${local.project_name}-cloudtrail-access-denied-${local.environment}"
   description = "Trigger on CloudTrail events whose errorCode is AccessDenied"
+  state       = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
 
   event_pattern = jsonencode({
     "detail-type" = ["AWS API Call via CloudTrail"]
     detail = {
-      errorCode = ["AccessDenied", "Client.UnauthorizedOperation"]
+      errorCode = [
+        "AccessDenied",
+        "AccessDeniedException",
+        "UnauthorizedOperation",
+        "Client.UnauthorizedOperation"
+      ]
     }
   })
 
