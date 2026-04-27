@@ -31,6 +31,8 @@ Step Functions State Machine
 
 | Resource | Description |
 |---|---|
+| **CloudTrail Trail** | Regional trail that records all read/write management events and writes logs to the dedicated S3 bucket |
+| **S3 Bucket (CloudTrail)** | Stores CloudTrail log files; objects are automatically deleted after 365 days |
 | **EventBridge Rule** | Captures every CloudTrail management event with `errorCode: AccessDenied` or `Client.UnauthorizedOperation` |
 | **Step Functions State Machine** | Orchestrates the two Lambdas; branches on whether a policy was actually created |
 | **Lambda – auto-fix** | Safety-gated remediation: only acts on roles whose trust policy allows `sts:AssumeRoleWithWebIdentity` from the GitHub Actions OIDC provider |
