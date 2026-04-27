@@ -62,10 +62,11 @@ resource "aws_lambda_function" "github_issue" {
   timeout          = 30
 
   environment {
-    variables = {
-      GITHUB_TOKEN_SSM_PATH = local.github_token_ssm_path
+      variables = {
+        GITHUB_TOKEN_SSM_PATH = local.github_token_ssm_path
+        GITHUB_ORG            = local.organization
+      }
     }
-  }
 
   depends_on = [aws_cloudwatch_log_group.github_issue]
 
