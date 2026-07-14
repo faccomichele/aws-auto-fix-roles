@@ -33,6 +33,11 @@ GITHUB_TOKEN_SSM_PATH: str = os.environ.get(
     "MISSING_GITHUB_TOKEN_SSM_PATH!",  # e.g. "/aws-auto-roles-fix/dev/github-token"
 )
 
+GITHUB_ORG: str = os.environ.get(
+    "GITHUB_ORG",
+    "MISSING_GITHUB_ORG!",  # e.g. "faccomichele-org"
+)
+
 # GitHub REST API version – see https://docs.github.com/en/rest/overview/api-versions
 GITHUB_API_VERSION = "2022-11-28"
 
@@ -74,7 +79,7 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
     )
 
     issue_url = _create_github_issue(
-        repo_name=repo_name,
+        repo_name=f"{GITHUB_ORG}/{repo_name}",
         title=issue_title,
         body=issue_body,
         labels=["bug"],
