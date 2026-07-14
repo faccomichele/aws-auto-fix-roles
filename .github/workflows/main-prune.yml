@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     name: "[BUILD]"
-    uses: faccomichele-org/gha-reusables/.github/workflows/lambda-build.yml@main
+    uses: faccomichele/gha-reusables/.github/workflows/lambda-build.yml@main
     with:
       environment: 'dev'
       region: 'eu-central-1'
@@ -27,7 +27,7 @@ jobs:
   dev:
     needs: build
     name: "[DEV]"
-    uses: faccomichele-org/gha-reusables/.github/workflows/terraform-run.yml@main
+    uses: faccomichele/gha-reusables/.github/workflows/terraform-run.yml@main
     with:
       environment: 'dev'
       region: 'eu-central-1'

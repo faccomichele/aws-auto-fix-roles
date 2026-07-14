@@ -16,4 +16,4 @@ concurrency:
 jobs:
   main:
     name: "[SELF]"
-    uses: faccomichele-org/gha-reusables/.github/workflows/delete-labels.yml@main
+    uses: faccomichele/gha-reusables/.github/workflows/delete-labels.yml@main

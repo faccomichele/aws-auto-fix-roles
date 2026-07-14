@@ -33,6 +33,8 @@ OIDC_PROVIDER_URL: str = os.environ.get(
     "MISSING_OIDC_PROVIDER_URL!",  # e.g. "token.actions.githubusercontent.com"
 )
 
+ENVIRONMENTS: list[str] = _load_environments()
+
 SSM_PATH_PREFIX: str = os.environ.get(
     "SSM_PATH_PREFIX",
     "MISSING_SSM_PATH_PREFIX!",  # e.g. "/org/project/env/auto-fix/"
@@ -77,6 +79,15 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         return {}
 
     role_name: str = role_arn.split("/")[-1]
+
+    if not any(environment in role_name for environment in ENVIRONMENTS):
+        logger.info(
+            "Role '%s' does not contain any allowed environment '%s' – skipping",
+            role_name,
+            ENVIRONMENTS,
+        )
+        return {}
+
     account_id: str = session_issuer.get("accountId") or role_arn.split(":")[4]
 
     expected_provider = (
@@ -172,6 +183,24 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _load_environments() -> list[str]:
+    """Load the allowed environment substrings from the Lambda environment."""
+    raw_value = os.environ.get("ENVIRONMENTS", '["MISSING_ENVIRONMENTS!"]')
+    try:
+        parsed_value = json.loads(raw_value)
+    except json.JSONDecodeError:
+        logger.warning("ENVIRONMENTS is not valid JSON; using raw string value")
+        return [raw_value]
+
+    if isinstance(parsed_value, str):
+        return [parsed_value]
+    if isinstance(parsed_value, list):
+        return [str(item) for item in parsed_value if str(item)]
+
+    logger.warning("ENVIRONMENTS is not a string or list; falling back to a single value")
+    return [str(parsed_value)]
+
+
 def _get_role_trust_policy(role_name: str) -> dict | None:
     """Return the trust policy document for *role_name*, or *None* on failure."""
     try:
@@ -262,7 +291,7 @@ def _is_auto_fix_enabled(role_name: str) -> bool:
 
     The parameter path is ``{SSM_PATH_PREFIX}{role_name}``.
     If the parameter does not exist it is created with value ``'true'`` so that
-    auto-fix is opt-out rather than opt-in.
+    auto-fix is opt-in automatically.
     """
     param_name = f"{SSM_PATH_PREFIX}{role_name}"
     try:
