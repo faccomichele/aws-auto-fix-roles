@@ -10,5 +10,5 @@ terraform {
 }
 
 provider "aws" {
-  region = local.aws_region
+  region = "us-east-1" # Default region for IAM role management.
 }
