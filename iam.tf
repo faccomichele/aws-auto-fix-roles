@@ -119,10 +119,14 @@ resource "aws_iam_role_policy" "lambda_github_issue" {
         Resource = "${aws_cloudwatch_log_group.github_issue.arn}:*"
       },
       {
-        Sid      = "AllowSSMGetGitHubToken"
+        Sid      = "AllowSSMGetGitHubAppCredentials"
         Effect   = "Allow"
         Action   = ["ssm:GetParameter"]
-        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.github_token_ssm_path}"
+        Resource = [
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.github_app_client_id_ssm_path}",
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.github_app_installation_id_ssm_path}",
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.github_app_private_key_ssm_path}",
+        ]
       },
     ]
   })
