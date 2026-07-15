@@ -1,5 +1,5 @@
 locals {
-  environment           = split("_", terraform.workspace)
+  environment           = terraform.workspace
   organization          = var.tags["Organization"] != null ? var.tags["Organization"] : "unknown"
   project_name          = var.tags["Project"] != null ? var.tags["Project"] : "unknown"
   log_retention_in_days = local.environment == "prod" ? 30 : 7
