@@ -28,7 +28,7 @@ jobs:
     uses: faccomichele/gha-reusables/.github/workflows/lambda-build.yml@main
     with:
       environment: 'dev'
-      region: 'eu-central-1'
+      region: 'us-east-1'
       working-directory: './lambdas'
       full-rebuild: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.full-rebuild == 'true' }}
     secrets: inherit
@@ -36,12 +36,17 @@ jobs:
   dev:
     needs: build
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    name: "[DEV]"
+    name: "[DEV - ${{ matrix.environment_prefix }}]"
+    strategy:
+      matrix:
+        environment_prefix: ${{ fromJSON(vars['ENVIRONMENT_PREFIXES_JSON'] || '[""]') }}
     uses: faccomichele/gha-reusables/.github/workflows/terraform-run.yml@main
     with:
       environment: 'dev'
-      region: 'eu-central-1'
+      region: 'us-east-1'
+      global: true
       working-directory: '.'
       lambda-working-directory: './lambdas'
+      environment-prefix: ${{ matrix.environment_prefix }}
       action: 'plan'
     secrets: inherit
