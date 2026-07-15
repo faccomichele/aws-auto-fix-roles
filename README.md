@@ -23,7 +23,8 @@ Step Functions State Machine
         │     • Attaches it to the role
         │
         └─► Lambda: github-issue
-              • Retrieves a GitHub token from SSM Parameter Store
+                  • Retrieves GitHub App credentials from SSM Parameter Store
+                  • Exchanges an App JWT for an installation access token
               • Opens a GitHub issue on the affected repository
 ```
 
@@ -37,7 +38,7 @@ Step Functions State Machine
 | **Step Functions State Machine** | Orchestrates the two Lambdas; branches on whether a policy was actually created |
 | **Lambda – auto-fix** | Safety-gated remediation: only acts on roles whose trust policy allows `sts:AssumeRoleWithWebIdentity` from the GitHub Actions OIDC provider |
 | **Lambda – github-issue** | Opens a GitHub issue with a summary table and action items on the affected repository |
-| **SSM Parameter** | Stores the GitHub fine-grained personal-access token (SecureString) |
+| **SSM Parameters** | Store the GitHub App client id, installation id, and private key |
 | **IAM Roles & Policies** | Least-privilege execution roles for Lambda, Step Functions, and EventBridge |
 | **CloudWatch Log Groups** | Centralised logging for the state machine and both Lambdas |
 
@@ -46,7 +47,11 @@ Step Functions State Machine
 - Terraform >= 1.3.0
 - AWS provider >= 5.0
 - A Terraform workspace named `<environment>_<region>` (e.g. `dev_eu-west-1`)
-- A GitHub fine-grained personal-access token with `issues: write` permission on the target repositories
+- A GitHub App installed on the target repositories with `Issues: Read and write` permission
+- GitHub App credentials:
+        - App client id
+        - App installation id
+        - App private key (PEM)
 
 ## Usage
 
@@ -76,25 +81,42 @@ terraform plan
 terraform apply
 ```
 
-### 4. Set the GitHub token
+### 4. Set GitHub App credentials
 
-After the first apply, store the GitHub token in SSM (the placeholder value is never overwritten by Terraform):
+After the first apply, store GitHub App credentials in SSM (placeholder values are never overwritten by Terraform):
 
 ```bash
 aws ssm put-parameter \
-  --name "/<project>/<env>/github-token" \
-  --value "<your-token>" \
-  --type SecureString \
+        --name "/<organization>/<project>/<env>/github-app-client-id" \
+        --value "<your-app-client-id>" \
+        --type String \
+        --overwrite
+
+aws ssm put-parameter \
+        --name "/<organization>/<project>/<env>/github-app-installation-id" \
+        --value "<your-app-installation-id>" \
+        --type String \
+        --overwrite
+
+aws ssm put-parameter \
+        --name "/<organization>/<project>/<env>/github-app-private-key" \
+        --value "<your-app-private-key-pem>" \
+        --type SecureString \
   --overwrite
 ```
 
 ### 5. Package the Lambdas
 
-The Lambda functions must be zipped before apply:
+The Lambda functions must be zipped before apply. The GitHub issue Lambda needs `PyJWT` bundled:
 
 ```bash
 zip -j lambdas/auto_fix.zip lambdas/auto_fix/handler.py
-zip -j lambdas/github_issue.zip lambdas/github_issue/handler.py
+
+rm -rf lambdas/github_issue/build
+mkdir -p lambdas/github_issue/build
+pip install --target lambdas/github_issue/build -r lambdas/github_issue/requirements.txt
+cp lambdas/github_issue/handler.py lambdas/github_issue/build/handler.py
+cd lambdas/github_issue/build && zip -r ../../github_issue.zip . && cd -
 ```
 
 ## Inputs
@@ -107,7 +129,9 @@ zip -j lambdas/github_issue.zip lambdas/github_issue/handler.py
 
 | Output | Description |
 |---|---|
-| `github_token_ssm_path` | SSM path used to store the GitHub fine-grained token |
+| `github_app_client_id_ssm_path` | SSM path used to store the GitHub App client id |
+| `github_app_installation_id_ssm_path` | SSM path used to store the GitHub App installation id |
+| `github_app_private_key_ssm_path` | SSM path used to store the GitHub App private key |
 
 ## Safety
 

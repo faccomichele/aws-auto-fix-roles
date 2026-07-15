@@ -64,8 +64,10 @@ resource "aws_lambda_function" "github_issue" {
 
   environment {
       variables = {
-        GITHUB_TOKEN_SSM_PATH = local.github_token_ssm_path
-        GITHUB_ORG            = local.organization
+        GITHUB_APP_CLIENT_ID_SSM_PATH       = local.github_app_client_id_ssm_path
+        GITHUB_APP_INSTALLATION_ID_SSM_PATH = local.github_app_installation_id_ssm_path
+        GITHUB_APP_PRIVATE_KEY_SSM_PATH     = local.github_app_private_key_ssm_path
+        GITHUB_ORG                          = local.organization
       }
     }
 

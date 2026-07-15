@@ -11,26 +11,41 @@ Input (from the Step Function Payload)
 
 Behaviour
 ---------
-1. Retrieves the GitHub fine-grained token from SSM Parameter Store
-   (SecureString).
-2. Opens a GitHub issue on the affected repository, labelled ``bug``, using
+1. Retrieves GitHub App credentials from SSM Parameter Store:
+    - app client id
+    - app installation id
+    - app private key (SecureString)
+2. Exchanges a short-lived GitHub App JWT for an installation access token.
+3. Opens a GitHub issue on the affected repository, labelled ``bug``, using
    the GitHub REST API.
-3. Returns ``{"status": "success", "issue_url": str}`` on success.
+4. Returns ``{"status": "success", "issue_url": str}`` on success.
 """
 
 import os
 import json
+import time
 import boto3
 import logging
 import urllib.error
 import urllib.request
+import jwt
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-GITHUB_TOKEN_SSM_PATH: str = os.environ.get(
-    "GITHUB_TOKEN_SSM_PATH",
-    "MISSING_GITHUB_TOKEN_SSM_PATH!",  # e.g. "/aws-auto-roles-fix/dev/github-token"
+GITHUB_APP_CLIENT_ID_SSM_PATH: str = os.environ.get(
+    "GITHUB_APP_CLIENT_ID_SSM_PATH",
+    "MISSING_GITHUB_APP_CLIENT_ID_SSM_PATH!",  # e.g. "/org/project/dev/github-app-client-id"
+)
+
+GITHUB_APP_INSTALLATION_ID_SSM_PATH: str = os.environ.get(
+    "GITHUB_APP_INSTALLATION_ID_SSM_PATH",
+    "MISSING_GITHUB_APP_INSTALLATION_ID_SSM_PATH!",  # e.g. "/org/project/dev/github-app-installation-id"
+)
+
+GITHUB_APP_PRIVATE_KEY_SSM_PATH: str = os.environ.get(
+    "GITHUB_APP_PRIVATE_KEY_SSM_PATH",
+    "MISSING_GITHUB_APP_PRIVATE_KEY_SSM_PATH!",  # e.g. "/org/project/dev/github-app-private-key"
 )
 
 GITHUB_ORG: str = os.environ.get(
@@ -67,7 +82,12 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         )
         return {"status": "skipped", "reason": "missing required fields"}
 
-    github_token = _get_github_token()
+    app_client_id, installation_id, private_key = _get_github_app_credentials()
+    github_token = _get_github_installation_token(
+        app_client_id=app_client_id,
+        installation_id=installation_id,
+        private_key=private_key,
+    )
 
     issue_title = f"[Auto-Correction] IAM policy created: {policy_name}"
     issue_body = _build_issue_body(
@@ -95,13 +115,81 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _get_github_token() -> str:
-    """Retrieve the GitHub fine-grained token from SSM Parameter Store."""
+def _get_github_app_credentials() -> tuple[str, str, str]:
+    """Retrieve GitHub App client id, installation id and private key from SSM."""
     try:
-        response = ssm.get_parameter(Name=GITHUB_TOKEN_SSM_PATH, WithDecryption=True)
-        return response["Parameter"]["Value"]
+        app_client_id = ssm.get_parameter(Name=GITHUB_APP_CLIENT_ID_SSM_PATH, WithDecryption=True)[
+            "Parameter"
+        ]["Value"]
+        installation_id = ssm.get_parameter(
+            Name=GITHUB_APP_INSTALLATION_ID_SSM_PATH,
+            WithDecryption=True,
+        )["Parameter"]["Value"]
+        private_key = ssm.get_parameter(Name=GITHUB_APP_PRIVATE_KEY_SSM_PATH, WithDecryption=True)[
+            "Parameter"
+        ]["Value"]
+        return app_client_id, installation_id, private_key
     except Exception:
-        logger.exception("Failed to retrieve GitHub token from SSM path '%s'", GITHUB_TOKEN_SSM_PATH)
+        logger.exception(
+            "Failed to retrieve GitHub App credentials from SSM paths '%s', '%s', '%s'",
+            GITHUB_APP_CLIENT_ID_SSM_PATH,
+            GITHUB_APP_INSTALLATION_ID_SSM_PATH,
+            GITHUB_APP_PRIVATE_KEY_SSM_PATH,
+        )
+        raise
+
+
+def _get_github_installation_token(
+    app_client_id: str,
+    installation_id: str,
+    private_key: str,
+) -> str:
+    """Create a GitHub App JWT and exchange it for an installation access token."""
+    now = int(time.time())
+    app_jwt = jwt.encode(
+        {
+            "iat": now - 60,
+            "exp": now + 540,
+            "iss": app_client_id,
+        },
+        private_key,
+        algorithm="RS256",
+    )
+
+    if isinstance(app_jwt, bytes):
+        app_jwt = app_jwt.decode("utf-8")
+
+    url = f"https://api.github.com/app/installations/{installation_id}/access_tokens"
+    req = urllib.request.Request(
+        url=url,
+        data=b"{}",
+        headers={
+            "Authorization": f"Bearer {app_jwt}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": GITHUB_API_VERSION,
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            token = data.get("token", "")
+            if not token:
+                raise ValueError("Missing token in GitHub installation token response")
+            return token
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8")
+        logger.error(
+            "GitHub App token exchange failed with HTTP %s for installation %s: %s",
+            exc.code,
+            installation_id,
+            error_body,
+        )
+        raise
+    except Exception:
+        logger.exception("Unexpected error while creating GitHub installation token")
         raise
 
 
