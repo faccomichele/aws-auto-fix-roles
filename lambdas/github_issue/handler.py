@@ -2,12 +2,15 @@
 Lambda 2 – github-issue
 ========================
 Called by the Step Functions state machine **only** when Lambda 1 (auto-fix)
-has successfully created and attached a remediation IAM policy.
+has successfully remediated a role by creating/reusing and/or attaching a
+remediation IAM policy.
 
 Input (from the Step Function Payload)
 ---------------------------------------
-``{"policy_name": str, "policy_arn": str, "repo_name": str,
-    "role_name": str, "denied_action": str}``
+``{"policy_name": str, "policy_arn": str, "repo_org": str,
+    "repo_name": str, "role_name": str, "denied_action": str,
+    "policy_action": str, "attachment_action": str,
+    "actions_taken": list[str]}``
 
 Behaviour
 ---------
@@ -146,32 +149,42 @@ def _build_issue_body(
     policy_name: str,
     policy_arn: str,
     role_name: str,
+    repo_org: str,
     repo_name: str,
     denied_action: str,
+    policy_action: str,
+    attachment_action: str,
 ) -> str:
     """Render the GitHub issue body from a common template."""
+    repository_slug = f"{repo_org}/{repo_name}" if repo_org else repo_name
+    policy_action_text = "created a new policy" if policy_action == "created" else "reused an existing policy"
+    attachment_action_text = (
+        "attached it to the role" if attachment_action == "attached" else "left the attachment unchanged"
+    )
+
     return f"""\
 ## Auto-Correction: IAM Permission Issue Detected
 
-An `AccessDenied` error was detected and **automatically remediated** for a \
-GitHub Actions workflow in this repository.
+An `AccessDenied` error was detected and **automatically remediated** for the \
+GitHub Actions workflow in `{repository_slug}`.
 
 ### Summary
 
 | Field | Value |
 |-------|-------|
-| **Repository** | `{repo_name}` |
+| **Repository** | `{repository_slug}` |
 | **IAM Role** | `{role_name}` |
 | **Denied Action** | `{denied_action}` |
-| **Policy Created** | `{policy_name}` |
+| **Policy Action** | `{policy_action}` |
+| **Attachment Action** | `{attachment_action}` |
+| **Policy Name** | `{policy_name}` |
 | **Policy ARN** | `{policy_arn}` |
 
 ### What Happened
 
 A GitHub Actions workflow encountered an `AccessDenied` error while attempting \
-to perform `{denied_action}`.  The automation detected this event and \
-automatically created the IAM policy **`{policy_name}`** to grant the missing \
-permission and attached it to the role **`{role_name}`**.
+to perform `{denied_action}`. The automation detected this event and \
+automatically {policy_action_text} to grant the missing permission and {attachment_action_text} for the role **`{role_name}`**.
 
 ### Action Required
 
@@ -242,9 +255,12 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
 
     policy_name: str = event.get("policy_name", "")
     policy_arn: str = event.get("policy_arn", "")
+    repo_org: str = event.get("repo_org", GITHUB_ORG)
     repo_name: str = event.get("repo_name", "")
     role_name: str = event.get("role_name", "")
     denied_action: str = event.get("denied_action", "")
+    policy_action: str = event.get("policy_action", "created")
+    attachment_action: str = event.get("attachment_action", "attached")
 
     if not policy_name or not repo_name:
         logger.warning(
@@ -261,17 +277,20 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         private_key=private_key,
     )
 
-    issue_title = f"[Auto-Correction] IAM policy created: {policy_name}"
+    issue_title = f"[Auto-Correction] IAM permission remediated: {policy_name}"
     issue_body = _build_issue_body(
         policy_name=policy_name,
         policy_arn=policy_arn,
         role_name=role_name,
+        repo_org=repo_org,
         repo_name=repo_name,
         denied_action=denied_action,
+        policy_action=policy_action,
+        attachment_action=attachment_action,
     )
 
     issue_url = _create_github_issue(
-        repo_name=f"{GITHUB_ORG}/{repo_name}",
+        repo_name=f"{repo_org}/{repo_name}",
         title=issue_title,
         body=issue_body,
         labels=["bug"],

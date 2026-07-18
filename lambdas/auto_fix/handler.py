@@ -6,15 +6,17 @@ CloudTrail ``errorCode: AccessDenied`` event.
 
 Safety gate
 -----------
-The function only acts on IAM roles whose *trust policy* contains a statement
-that allows ``sts:AssumeRoleWithWebIdentity`` from the GitHub Actions OIDC
-provider (``token.actions.githubusercontent.com``).  Any other identity type is
-silently ignored and the function returns an empty dict ``{}``.
+The function only acts on IAM roles whose IAM metadata includes a
+``RepositoryURL`` tag. The tag value is used to recover the repository org and
+repository name. Any role without that tag is silently ignored and the
+function returns an empty dict ``{}``.
 
 Happy-path return value
 -----------------------
-``{"policy_name": str, "policy_arn": str, "repo_name": str,
-    "role_name": str, "denied_action": str}``
+``{"policy_name": str, "policy_arn": str, "repo_org": str,
+    "repo_name": str, "role_name": str, "denied_action": str,
+    "policy_action": str, "attachment_action": str,
+    "actions_taken": list[str]}``
 
 If nothing was changed the function returns ``{}``.
 """
@@ -27,11 +29,6 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-
-OIDC_PROVIDER_URL: str = os.environ.get(
-    "OIDC_PROVIDER_URL",
-    "MISSING_OIDC_PROVIDER_URL!",  # e.g. "token.actions.githubusercontent.com"
-)
 
 SSM_PATH_PREFIX: str = os.environ.get(
     "SSM_PATH_PREFIX",
@@ -65,64 +62,96 @@ def _load_environments() -> list[str]:
     return [str(parsed_value)]
 
 
-def _get_role_trust_policy(role_name: str) -> dict | None:
-    """Return the trust policy document for *role_name*, or *None* on failure."""
+def _get_role_repository_url(role_name: str) -> tuple[str, str] | None:
+    """Return the RepositoryURL tag as ``(org_name, repo_name)`` or ``None``.
+
+    The tag value is expected to be a slash-delimited repository URL or slug,
+    where the last path segment is the repository name and the second-to-last
+    segment is the organization name.
+    """
     try:
         response = iam.get_role(RoleName=role_name)
-        return response["Role"]["AssumeRolePolicyDocument"]
+        for tag in response["Role"].get("Tags", []):
+            if tag.get("Key") != "RepositoryURL":
+                continue
+
+            repository_url = str(tag.get("Value", "")).strip().strip("/")
+            if not repository_url:
+                logger.warning("Role '%s' has an empty RepositoryURL tag", role_name)
+                return None
+
+            parts = [segment for segment in repository_url.split("/") if segment]
+            if len(parts) < 2:
+                logger.warning(
+                    "RepositoryURL tag '%s' on role '%s' does not contain an org and repo",
+                    repository_url,
+                    role_name,
+                )
+                return None
+
+            return parts[-2], parts[-1]
+
+        logger.info("Role '%s' does not have a RepositoryURL tag", role_name)
+        return None
     except Exception:
-        logger.exception("Failed to retrieve role '%s'", role_name)
+        logger.exception("Failed to retrieve RepositoryURL tag for role '%s'", role_name)
         return None
 
 
-def _is_github_actions_oidc_role(trust_policy: dict, expected_provider: str) -> bool:
-    """Return *True* iff the trust policy allows sts:AssumeRoleWithWebIdentity
-    from the expected GitHub Actions OIDC provider ARN."""
-    for statement in trust_policy.get("Statement", []):
-        actions = statement.get("Action", [])
-        if isinstance(actions, str):
-            actions = [actions]
-        if "sts:AssumeRoleWithWebIdentity" not in actions:
-            continue
-
-        principal = statement.get("Principal", {})
-        federated = principal.get("Federated", "")
-        if isinstance(federated, list):
-            if expected_provider in federated:
-                return True
-        elif federated == expected_provider:
-            return True
-
-    return False
+def _sanitize_policy_segment(value: str) -> str:
+    """Return a policy-name-safe segment."""
+    return re.sub(r"[^A-Za-z0-9+=,.@_-]", "-", value)
 
 
-def _extract_repo_from_trust_policy(trust_policy: dict) -> str:
-    """Extract the repository name from the OIDC ``sub`` condition in the trust policy.
+def _policy_document_canonical(policy_document: dict) -> str:
+    """Return a stable string representation for policy comparisons."""
+    return json.dumps(policy_document, sort_keys=True, separators=(",", ":"))
 
-    Looks for a condition key ``<OIDC_PROVIDER_URL>:sub`` whose value follows the
-    GitHub Actions format ``repo:owner/repo-name:*``.  Returns just the bare
-    repository name (e.g. ``aws-auto-fix-roles``), or an empty string when not found.
-    """
-    sub_key = f"{OIDC_PROVIDER_URL}:sub"
-    for statement in trust_policy.get("Statement", []):
-        actions = statement.get("Action", [])
-        if isinstance(actions, str):
-            actions = [actions]
-        if "sts:AssumeRoleWithWebIdentity" not in actions:
-            continue
 
-        for condition_op in statement.get("Condition", {}).values():
-            sub_value = condition_op.get(sub_key, "")
-            if not sub_value:
+def _build_policy_name_prefix(role_name: str, action: str) -> str:
+    """Build the stable prefix used for idempotent policy lookup."""
+    return (
+        f"auto-correction-{_sanitize_policy_segment(role_name)}-"
+        f"{_sanitize_policy_segment(action)}-"
+    )
+
+
+def _find_matching_policy(policy_name_prefix: str, policy_document: dict) -> tuple[str, str] | None:
+    """Return the latest matching local policy ARN/name whose document is identical."""
+    matches: list[tuple[datetime, str, str]] = []
+    expected_document = _policy_document_canonical(policy_document)
+
+    paginator = iam.get_paginator("list_policies")
+    for page in paginator.paginate(Scope="Local", PolicyNamePrefix=policy_name_prefix):
+        for policy in page.get("Policies", []):
+            try:
+                policy_version = iam.get_policy_version(
+                    PolicyArn=policy["Arn"],
+                    VersionId=policy["DefaultVersionId"],
+                )["PolicyVersion"]["Document"]
+            except Exception:
+                logger.exception("Failed to inspect IAM policy '%s'", policy.get("Arn", ""))
                 continue
-            # sub_value: "repo:owner/repo-name:*" – capture only the repo-name part
-            match = re.match(r"repo:[^/]+/([^:/]+)", sub_value)
-            if match:
-                return match.group(1)
-            logger.warning("Could not parse sub condition value '%s'", sub_value)
 
-    logger.warning("No '%s' sub condition found in trust policy", sub_key)
-    return ""
+            if _policy_document_canonical(policy_version) == expected_document:
+                matches.append((policy["CreateDate"], policy["PolicyName"], policy["Arn"]))
+
+    if not matches:
+        return None
+
+    matches.sort(key=lambda item: item[0], reverse=True)
+    _, policy_name, policy_arn = matches[0]
+    return policy_name, policy_arn
+
+
+def _is_policy_attached_to_role(role_name: str, policy_arn: str) -> bool:
+    """Return ``True`` when the role already has the policy attached."""
+    paginator = iam.get_paginator("list_attached_role_policies")
+    for page in paginator.paginate(RoleName=role_name):
+        for policy in page.get("AttachedPolicies", []):
+            if policy.get("PolicyArn") == policy_arn:
+                return True
+    return False
 
 
 def _build_iam_action(event_source: str, event_name: str) -> str:
@@ -131,7 +160,8 @@ def _build_iam_action(event_source: str, event_name: str) -> str:
         return ""
     # e.g. "s3.amazonaws.com" -> "s3", then "s3:PutObject"
     service = event_source.split(".")[0]
-    return f"{service}:{event_name}"
+    normalized_event_name = re.sub(r"\d{8}$", "", event_name)
+    return f"{service}:{normalized_event_name}"
 
 
 def _extract_resource_arns(resources: list) -> list:
@@ -233,22 +263,13 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
 
     account_id: str = session_issuer.get("accountId") or role_arn.split(":")[4]
 
-    expected_provider = (
-        f"arn:aws:iam::{account_id}:oidc-provider/{OIDC_PROVIDER_URL}"
-    )
-
-    # ── Fetch trust policy once ───────────────────────────────────────────────
-    trust_policy = _get_role_trust_policy(role_name)
-    if trust_policy is None:
+    # ── Safety gate: RepositoryURL tag must exist ────────────────────────────
+    repository_info = _get_role_repository_url(role_name)
+    if repository_info is None:
+        logger.info("Role '%s' does not have a valid RepositoryURL tag – skipping", role_name)
         return {}
 
-    # ── Safety check ─────────────────────────────────────────────────────────
-    if not _is_github_actions_oidc_role(trust_policy, expected_provider):
-        logger.info(
-            "Role '%s' does not use the GitHub Actions OIDC trust policy – skipping",
-            role_name,
-        )
-        return {}
+    repo_org, repo_name = repository_info
 
     # ── Auto-fix enabled check ────────────────────────────────────────────────
     if not _is_auto_fix_enabled(role_name):
@@ -257,9 +278,6 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
             role_name,
         )
         return {}
-
-    # ── Extract repo name from the role's trust policy sub condition ──────────
-    repo_name: str = _extract_repo_from_trust_policy(trust_policy)
 
     # ── Build the allow statement for the denied action ───────────────────────
     action = _build_iam_action(detail.get("eventSource", ""), detail.get("eventName", ""))
@@ -273,11 +291,6 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         return {}
 
     resource_arns = _extract_resource_arns(detail.get("resources", []))
-
-    # ── Create a uniquely-named IAM policy ────────────────────────────────────
-    timestamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
-    policy_name = f"auto-correction-{role_name}-{timestamp}"
-
     policy_document = {
         "Version": "2012-10-17",
         "Statement": [
@@ -290,31 +303,62 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         ],
     }
 
-    try:
-        response = iam.create_policy(
-            PolicyName=policy_name,
-            PolicyDocument=json.dumps(policy_document),
-            Description=(
-                f"Auto-correction for role {role_name} – "
-                f"AccessDenied on {action or 'unknown'} – created {timestamp} UTC"
-            ),
-        )
-        policy_arn: str = response["Policy"]["Arn"]
-        logger.info("Created policy: %s", policy_arn)
-    except Exception:
-        logger.exception("Failed to create IAM policy '%s'", policy_name)
-        raise
+    policy_name_prefix = _build_policy_name_prefix(role_name, action)
 
-    try:
-        iam.attach_role_policy(RoleName=role_name, PolicyArn=policy_arn)
-        logger.info("Attached policy %s to role %s", policy_arn, role_name)
-    except Exception:
-        logger.exception("Failed to attach policy '%s' to role '%s'", policy_arn, role_name)
-        raise
+    existing_policy = _find_matching_policy(policy_name_prefix, policy_document)
+    if existing_policy is not None:
+        policy_name, policy_arn = existing_policy
+        policy_action = "reused"
+        logger.info("Reusing existing policy %s", policy_arn)
+    else:
+        timestamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
+        policy_name = f"{policy_name_prefix}{timestamp}"
+
+        try:
+            response = iam.create_policy(
+                PolicyName=policy_name,
+                PolicyDocument=json.dumps(policy_document),
+                Description=(
+                    f"Auto-correction for role {role_name} – "
+                    f"AccessDenied on {action or 'unknown'} – created {timestamp} UTC"
+                ),
+            )
+            policy_arn = response["Policy"]["Arn"]
+            policy_action = "created"
+            logger.info("Created policy: %s", policy_arn)
+        except Exception:
+            logger.exception("Failed to create IAM policy '%s'", policy_name)
+            raise
+
+    attachment_action = "already_attached"
+    if not _is_policy_attached_to_role(role_name, policy_arn):
+        try:
+            iam.attach_role_policy(RoleName=role_name, PolicyArn=policy_arn)
+            attachment_action = "attached"
+            logger.info("Attached policy %s to role %s", policy_arn, role_name)
+        except Exception:
+            logger.exception("Failed to attach policy '%s' to role '%s'", policy_arn, role_name)
+            raise
+
+    if policy_action == "reused" and attachment_action == "already_attached":
+        return {}
+
+    actions_taken: list[str] = []
+    if policy_action == "created":
+        actions_taken.append("policy_created")
+    elif policy_action == "reused":
+        actions_taken.append("policy_reused")
+
+    if attachment_action == "attached":
+        actions_taken.append("policy_attached")
 
     return {
         "policy_name": policy_name,
         "policy_arn": policy_arn,
+        "policy_action": policy_action,
+        "attachment_action": attachment_action,
+        "actions_taken": actions_taken,
+        "repo_org": repo_org,
         "repo_name": repo_name,
         "role_name": role_name,
         "denied_action": action or "",

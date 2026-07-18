@@ -24,7 +24,6 @@ resource "aws_lambda_function" "auto_fix" {
   environment {
     variables = {
       ENVIRONMENTS      = jsonencode([local.environment])
-      OIDC_PROVIDER_URL = "token.actions.githubusercontent.com"
       SSM_PATH_PREFIX   = "/${local.organization}/${local.project_name}/${local.environment}/auto-fix/"
     }
   }
