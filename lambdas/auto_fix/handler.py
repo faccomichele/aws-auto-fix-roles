@@ -107,6 +107,18 @@ def _sanitize_policy_segment(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9+=,.@_-]", "-", value)
 
 
+def _clean_role_name_for_reporting(role_name: str) -> str:
+    """Return a display/policy role name without the ephemeral GHARole suffix.
+
+    Roles ending in ``-GHARole-<random>`` are normalized to remove the final
+    random segment (e.g. ``my-role-GHARole-abc123`` -> ``my-role-GHARole``).
+    """
+    parts = role_name.split("-")
+    if len(parts) >= 2 and parts[-2] == "GHARole":
+        return "-".join(parts[:-1])
+    return role_name
+
+
 def _policy_document_canonical(policy_document: dict) -> str:
     """Return a stable string representation for policy comparisons."""
     return json.dumps(policy_document, sort_keys=True, separators=(",", ":"))
@@ -308,14 +320,14 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         logger.warning("Could not find role ARN in event – skipping")
         return {}
 
-    role_name: str = role_arn.split("/")[-1]
+    full_role_name: str = role_arn.split("/")[-1]
 
     ENVIRONMENTS: list[str] = _load_environments()
 
-    if not any(environment in role_name for environment in ENVIRONMENTS):
+    if not any(environment in full_role_name for environment in ENVIRONMENTS):
         logger.info(
             "Role '%s' does not contain any allowed environment '%s' – skipping",
-            role_name,
+            full_role_name,
             ENVIRONMENTS,
         )
         return {}
@@ -323,20 +335,22 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
     account_id: str = session_issuer.get("accountId") or role_arn.split(":")[4]
 
     # ── Safety gate: RepositoryURL tag must exist ────────────────────────────
-    repository_info = _get_role_repository_url(role_name)
+    repository_info = _get_role_repository_url(full_role_name)
     if repository_info is None:
-        logger.info("Role '%s' does not have a valid RepositoryURL tag – skipping", role_name)
+        logger.info("Role '%s' does not have a valid RepositoryURL tag – skipping", full_role_name)
         return {}
 
     repo_org, repo_name = repository_info
 
     # ── Auto-fix enabled check ────────────────────────────────────────────────
-    if not _is_auto_fix_enabled(role_name):
+    if not _is_auto_fix_enabled(full_role_name):
         logger.info(
             "Auto-fix is disabled for role '%s' – skipping",
-            role_name,
+            full_role_name,
         )
         return {}
+
+    role_name = _clean_role_name_for_reporting(full_role_name)
 
     # ── Build the allow statement for the denied action ───────────────────────
     action = _build_iam_action(detail.get("eventSource", ""), detail.get("eventName", ""))
@@ -395,13 +409,13 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
             raise
 
     attachment_action = "already_attached"
-    if not _is_policy_attached_to_role(role_name, policy_arn):
+    if not _is_policy_attached_to_role(full_role_name, policy_arn):
         try:
-            iam.attach_role_policy(RoleName=role_name, PolicyArn=policy_arn)
+            iam.attach_role_policy(RoleName=full_role_name, PolicyArn=policy_arn)
             attachment_action = "attached"
-            logger.info("Attached policy %s to role %s", policy_arn, role_name)
+            logger.info("Attached policy %s to role %s", policy_arn, full_role_name)
         except Exception:
-            logger.exception("Failed to attach policy '%s' to role '%s'", policy_arn, role_name)
+            logger.exception("Failed to attach policy '%s' to role '%s'", policy_arn, full_role_name)
             raise
 
     if policy_action == "reused" and attachment_action == "already_attached":
