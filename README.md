@@ -107,7 +107,7 @@ aws ssm put-parameter \
 
 ### 5. Package the Lambdas
 
-The Lambda functions must be zipped before apply. The GitHub issue Lambda needs `PyJWT` bundled:
+The Lambda functions must be zipped before apply. The GitHub issue Lambda needs `PyJWT` with cryptography support bundled:
 
 ```bash
 zip -j lambdas/auto_fix.zip lambdas/auto_fix/handler.py
