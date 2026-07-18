@@ -60,57 +60,6 @@ ssm = boto3.client("ssm")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
-    """Create a GitHub issue reporting the auto-correction that took place."""
-    logger.info("Received event: %s", json.dumps(event))
-
-    policy_name: str = event.get("policy_name", "")
-    policy_arn: str = event.get("policy_arn", "")
-    repo_name: str = event.get("repo_name", "")
-    role_name: str = event.get("role_name", "")
-    denied_action: str = event.get("denied_action", "")
-
-    if not policy_name or not repo_name:
-        logger.warning(
-            "Missing required fields (policy_name=%r, repo_name=%r) – skipping",
-            policy_name,
-            repo_name,
-        )
-        return {"status": "skipped", "reason": "missing required fields"}
-
-    app_client_id, installation_id, private_key = _get_github_app_credentials()
-    github_token = _get_github_installation_token(
-        app_client_id=app_client_id,
-        installation_id=installation_id,
-        private_key=private_key,
-    )
-
-    issue_title = f"[Auto-Correction] IAM policy created: {policy_name}"
-    issue_body = _build_issue_body(
-        policy_name=policy_name,
-        policy_arn=policy_arn,
-        role_name=role_name,
-        repo_name=repo_name,
-        denied_action=denied_action,
-    )
-
-    issue_url = _create_github_issue(
-        repo_name=f"{GITHUB_ORG}/{repo_name}",
-        title=issue_title,
-        body=issue_body,
-        labels=["bug"],
-        token=github_token,
-    )
-
-    logger.info("Created GitHub issue: %s", issue_url)
-    return {"status": "success", "issue_url": issue_url}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -280,3 +229,54 @@ def _create_github_issue(
     except Exception:
         logger.exception("Unexpected error while calling the GitHub Issues API")
         raise
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
+    """Create a GitHub issue reporting the auto-correction that took place."""
+    logger.info("Received event: %s", json.dumps(event))
+
+    policy_name: str = event.get("policy_name", "")
+    policy_arn: str = event.get("policy_arn", "")
+    repo_name: str = event.get("repo_name", "")
+    role_name: str = event.get("role_name", "")
+    denied_action: str = event.get("denied_action", "")
+
+    if not policy_name or not repo_name:
+        logger.warning(
+            "Missing required fields (policy_name=%r, repo_name=%r) – skipping",
+            policy_name,
+            repo_name,
+        )
+        return {"status": "skipped", "reason": "missing required fields"}
+
+    app_client_id, installation_id, private_key = _get_github_app_credentials()
+    github_token = _get_github_installation_token(
+        app_client_id=app_client_id,
+        installation_id=installation_id,
+        private_key=private_key,
+    )
+
+    issue_title = f"[Auto-Correction] IAM policy created: {policy_name}"
+    issue_body = _build_issue_body(
+        policy_name=policy_name,
+        policy_arn=policy_arn,
+        role_name=role_name,
+        repo_name=repo_name,
+        denied_action=denied_action,
+    )
+
+    issue_url = _create_github_issue(
+        repo_name=f"{GITHUB_ORG}/{repo_name}",
+        title=issue_title,
+        body=issue_body,
+        labels=["bug"],
+        token=github_token,
+    )
+
+    logger.info("Created GitHub issue: %s", issue_url)
+    return {"status": "success", "issue_url": issue_url}
