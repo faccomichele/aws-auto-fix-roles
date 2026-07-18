@@ -33,8 +33,6 @@ OIDC_PROVIDER_URL: str = os.environ.get(
     "MISSING_OIDC_PROVIDER_URL!",  # e.g. "token.actions.githubusercontent.com"
 )
 
-ENVIRONMENTS: list[str] = _load_environments()
-
 SSM_PATH_PREFIX: str = os.environ.get(
     "SSM_PATH_PREFIX",
     "MISSING_SSM_PATH_PREFIX!",  # e.g. "/org/project/env/auto-fix/"
@@ -42,140 +40,6 @@ SSM_PATH_PREFIX: str = os.environ.get(
 
 iam = boto3.client("iam")
 ssm = boto3.client("ssm")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
-    """Process a CloudTrail AccessDenied event and auto-attach a remediation policy."""
-    logger.info("Received event: %s", json.dumps(event))
-
-    detail = event.get("detail", {})
-    error_code = detail.get("errorCode", "")
-
-    if error_code not in ("AccessDenied", "Client.UnauthorizedOperation"):
-        logger.info("errorCode '%s' is not AccessDenied – skipping", error_code)
-        return {}
-
-    user_identity = detail.get("userIdentity", {})
-
-    if user_identity.get("type") != "AssumedRole":
-        logger.info("userIdentity.type is not AssumedRole – skipping")
-        return {}
-
-    session_context = user_identity.get("sessionContext", {})
-    session_issuer = session_context.get("sessionIssuer", {})
-
-    if session_issuer.get("type") != "Role":
-        logger.info("sessionIssuer.type is not Role – skipping")
-        return {}
-
-    role_arn: str = session_issuer.get("arn", "")
-    if not role_arn:
-        logger.warning("Could not find role ARN in event – skipping")
-        return {}
-
-    role_name: str = role_arn.split("/")[-1]
-
-    if not any(environment in role_name for environment in ENVIRONMENTS):
-        logger.info(
-            "Role '%s' does not contain any allowed environment '%s' – skipping",
-            role_name,
-            ENVIRONMENTS,
-        )
-        return {}
-
-    account_id: str = session_issuer.get("accountId") or role_arn.split(":")[4]
-
-    expected_provider = (
-        f"arn:aws:iam::{account_id}:oidc-provider/{OIDC_PROVIDER_URL}"
-    )
-
-    # ── Fetch trust policy once ───────────────────────────────────────────────
-    trust_policy = _get_role_trust_policy(role_name)
-    if trust_policy is None:
-        return {}
-
-    # ── Safety check ─────────────────────────────────────────────────────────
-    if not _is_github_actions_oidc_role(trust_policy, expected_provider):
-        logger.info(
-            "Role '%s' does not use the GitHub Actions OIDC trust policy – skipping",
-            role_name,
-        )
-        return {}
-
-    # ── Auto-fix enabled check ────────────────────────────────────────────────
-    if not _is_auto_fix_enabled(role_name):
-        logger.info(
-            "Auto-fix is disabled for role '%s' – skipping",
-            role_name,
-        )
-        return {}
-
-    # ── Extract repo name from the role's trust policy sub condition ──────────
-    repo_name: str = _extract_repo_from_trust_policy(trust_policy)
-
-    # ── Build the allow statement for the denied action ───────────────────────
-    action = _build_iam_action(detail.get("eventSource", ""), detail.get("eventName", ""))
-    if not action:
-        logger.warning(
-            "Could not determine IAM action from eventSource='%s' eventName='%s' – "
-            "skipping to avoid creating an overly-permissive wildcard policy",
-            detail.get("eventSource", ""),
-            detail.get("eventName", ""),
-        )
-        return {}
-
-    resource_arns = _extract_resource_arns(detail.get("resources", []))
-
-    # ── Create a uniquely-named IAM policy ────────────────────────────────────
-    timestamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
-    policy_name = f"auto-correction-{role_name}-{timestamp}"
-
-    policy_document = {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "AutoCorrectionStatement",
-                "Effect": "Allow",
-                "Action": [action],
-                "Resource": resource_arns,
-            }
-        ],
-    }
-
-    try:
-        response = iam.create_policy(
-            PolicyName=policy_name,
-            PolicyDocument=json.dumps(policy_document),
-            Description=(
-                f"Auto-correction for role {role_name} – "
-                f"AccessDenied on {action or 'unknown'} – created {timestamp} UTC"
-            ),
-        )
-        policy_arn: str = response["Policy"]["Arn"]
-        logger.info("Created policy: %s", policy_arn)
-    except Exception:
-        logger.exception("Failed to create IAM policy '%s'", policy_name)
-        raise
-
-    try:
-        iam.attach_role_policy(RoleName=role_name, PolicyArn=policy_arn)
-        logger.info("Attached policy %s to role %s", policy_arn, role_name)
-    except Exception:
-        logger.exception("Failed to attach policy '%s' to role '%s'", policy_arn, role_name)
-        raise
-
-    return {
-        "policy_name": policy_name,
-        "policy_arn": policy_arn,
-        "repo_name": repo_name,
-        "role_name": role_name,
-        "denied_action": action or "",
-    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -319,3 +183,139 @@ def _is_auto_fix_enabled(role_name: str) -> bool:
             param_name,
         )
         return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
+    """Process a CloudTrail AccessDenied event and auto-attach a remediation policy."""
+    logger.info("Received event: %s", json.dumps(event))
+
+    detail = event.get("detail", {})
+    error_code = detail.get("errorCode", "")
+
+    if error_code not in ("AccessDenied", "Client.UnauthorizedOperation"):
+        logger.info("errorCode '%s' is not AccessDenied – skipping", error_code)
+        return {}
+
+    user_identity = detail.get("userIdentity", {})
+
+    if user_identity.get("type") != "AssumedRole":
+        logger.info("userIdentity.type is not AssumedRole – skipping")
+        return {}
+
+    session_context = user_identity.get("sessionContext", {})
+    session_issuer = session_context.get("sessionIssuer", {})
+
+    if session_issuer.get("type") != "Role":
+        logger.info("sessionIssuer.type is not Role – skipping")
+        return {}
+
+    role_arn: str = session_issuer.get("arn", "")
+    if not role_arn:
+        logger.warning("Could not find role ARN in event – skipping")
+        return {}
+
+    role_name: str = role_arn.split("/")[-1]
+
+    ENVIRONMENTS: list[str] = _load_environments()
+
+    if not any(environment in role_name for environment in ENVIRONMENTS):
+        logger.info(
+            "Role '%s' does not contain any allowed environment '%s' – skipping",
+            role_name,
+            ENVIRONMENTS,
+        )
+        return {}
+
+    account_id: str = session_issuer.get("accountId") or role_arn.split(":")[4]
+
+    expected_provider = (
+        f"arn:aws:iam::{account_id}:oidc-provider/{OIDC_PROVIDER_URL}"
+    )
+
+    # ── Fetch trust policy once ───────────────────────────────────────────────
+    trust_policy = _get_role_trust_policy(role_name)
+    if trust_policy is None:
+        return {}
+
+    # ── Safety check ─────────────────────────────────────────────────────────
+    if not _is_github_actions_oidc_role(trust_policy, expected_provider):
+        logger.info(
+            "Role '%s' does not use the GitHub Actions OIDC trust policy – skipping",
+            role_name,
+        )
+        return {}
+
+    # ── Auto-fix enabled check ────────────────────────────────────────────────
+    if not _is_auto_fix_enabled(role_name):
+        logger.info(
+            "Auto-fix is disabled for role '%s' – skipping",
+            role_name,
+        )
+        return {}
+
+    # ── Extract repo name from the role's trust policy sub condition ──────────
+    repo_name: str = _extract_repo_from_trust_policy(trust_policy)
+
+    # ── Build the allow statement for the denied action ───────────────────────
+    action = _build_iam_action(detail.get("eventSource", ""), detail.get("eventName", ""))
+    if not action:
+        logger.warning(
+            "Could not determine IAM action from eventSource='%s' eventName='%s' – "
+            "skipping to avoid creating an overly-permissive wildcard policy",
+            detail.get("eventSource", ""),
+            detail.get("eventName", ""),
+        )
+        return {}
+
+    resource_arns = _extract_resource_arns(detail.get("resources", []))
+
+    # ── Create a uniquely-named IAM policy ────────────────────────────────────
+    timestamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
+    policy_name = f"auto-correction-{role_name}-{timestamp}"
+
+    policy_document = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "AutoCorrectionStatement",
+                "Effect": "Allow",
+                "Action": [action],
+                "Resource": resource_arns,
+            }
+        ],
+    }
+
+    try:
+        response = iam.create_policy(
+            PolicyName=policy_name,
+            PolicyDocument=json.dumps(policy_document),
+            Description=(
+                f"Auto-correction for role {role_name} – "
+                f"AccessDenied on {action or 'unknown'} – created {timestamp} UTC"
+            ),
+        )
+        policy_arn: str = response["Policy"]["Arn"]
+        logger.info("Created policy: %s", policy_arn)
+    except Exception:
+        logger.exception("Failed to create IAM policy '%s'", policy_name)
+        raise
+
+    try:
+        iam.attach_role_policy(RoleName=role_name, PolicyArn=policy_arn)
+        logger.info("Attached policy %s to role %s", policy_arn, role_name)
+    except Exception:
+        logger.exception("Failed to attach policy '%s' to role '%s'", policy_arn, role_name)
+        raise
+
+    return {
+        "policy_name": policy_name,
+        "policy_arn": policy_arn,
+        "repo_name": repo_name,
+        "role_name": role_name,
+        "denied_action": action or "",
+    }
