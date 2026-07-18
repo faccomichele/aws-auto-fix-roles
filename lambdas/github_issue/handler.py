@@ -22,6 +22,9 @@ Behaviour
 3. Opens a GitHub issue on the affected repository, labelled ``bug``, using
    the GitHub REST API.
 4. Returns ``{"status": "success", "issue_url": str}`` on success.
+
+This notification is intentionally generic: it applies to any repository-
+associated IAM role remediated by Lambda 1, not only GitHub Actions roles.
 """
 
 import os
@@ -166,7 +169,7 @@ def _build_issue_body(
 ## Auto-Correction: IAM Permission Issue Detected
 
 An `AccessDenied` error was detected and **automatically remediated** for the \
-GitHub Actions workflow in `{repository_slug}`.
+repository `{repository_slug}`.
 
 ### Summary
 
@@ -182,7 +185,7 @@ GitHub Actions workflow in `{repository_slug}`.
 
 ### What Happened
 
-A GitHub Actions workflow encountered an `AccessDenied` error while attempting \
+A role associated with this repository encountered an `AccessDenied` error while attempting \
 to perform `{denied_action}`. The automation detected this event and \
 automatically {policy_action_text} to grant the missing permission and {attachment_action_text} for the role **`{role_name}`**.
 
@@ -205,7 +208,7 @@ permissions permanently.
 - [AWS IAM Best Practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)
 
 ---
-*This issue was automatically created by the \
+*This issue was automatically created by the repository IAM auto-fix \
 [aws-auto-roles-fix](https://github.com/faccomichele-org/aws-auto-roles-fix) \
 automation.*
 """
