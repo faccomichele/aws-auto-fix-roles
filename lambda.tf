@@ -53,6 +53,17 @@ resource "aws_cloudwatch_log_group" "github_issue" {
   )
 }
 
+
+# Lambda Layer for dependencies
+resource "aws_lambda_layer_version" "github_issue" {
+  filename                 = "${path.module}/lambdas/github_issue-layer.zip"
+  layer_name               = "${local.project_name}-github-issue-dependencies-${local.environment}"
+  compatible_runtimes      = [local.python_runtime]
+  source_code_hash         = filebase64sha256("${path.module}/lambdas/github_issue-layer.zip")
+  compatible_architectures = ["x86_64"]
+  description              = "Required dependencies"
+}
+
 resource "aws_lambda_function" "github_issue" {
   function_name    = "${local.project_name}-github-issue-${local.environment}"
   filename         = "${path.module}/lambdas/github_issue.zip"
@@ -61,6 +72,8 @@ resource "aws_lambda_function" "github_issue" {
   handler          = "handler.lambda_handler"
   runtime          = local.python_runtime
   timeout          = 30
+
+  layers = [aws_lambda_layer_version.github_issue.arn]
 
   environment {
       variables = {
