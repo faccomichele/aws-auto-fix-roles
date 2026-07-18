@@ -122,8 +122,11 @@ def _find_matching_policy(policy_name_prefix: str, policy_document: dict) -> tup
     expected_document = _policy_document_canonical(policy_document)
 
     paginator = iam.get_paginator("list_policies")
-    for page in paginator.paginate(Scope="Local", PolicyNamePrefix=policy_name_prefix):
+    for page in paginator.paginate(Scope="Local"):
         for policy in page.get("Policies", []):
+            if not policy.get("PolicyName", "").startswith(policy_name_prefix):
+                continue
+
             try:
                 policy_version = iam.get_policy_version(
                     PolicyArn=policy["Arn"],
@@ -164,13 +167,27 @@ def _build_iam_action(event_source: str, event_name: str) -> str:
     return f"{service}:{normalized_event_name}"
 
 
-def _extract_resource_arns(resources: list) -> list:
+def _extract_resource_arns(resources: list, error_message: str = "") -> list:
     """Pull ARNs from the CloudTrail ``resources`` array.
 
-    Falls back to ``["*"]`` when no ARNs are available – a security warning
-    is logged in that case so operators can review the resulting policy.
+    If ``resources`` is empty, tries to recover an ARN from ``errorMessage``
+    before falling back to ``["*"]``. A security warning is logged when the
+    wildcard fallback is used so operators can review the resulting policy.
     """
     arns = [r["ARN"] for r in resources if r.get("ARN")]
+    if not arns and error_message:
+        arn_matches = re.findall(r"arn:[^\s'\"<>]+", error_message)
+        filtered_arns: list[str] = []
+        for arn in arn_matches:
+            candidate_arn = arn.rstrip(".,;:)]}")
+            arn_parts = candidate_arn.split(":", 5)
+            if len(arn_parts) < 6:
+                continue
+            if arn_parts[2] == "sts":
+                continue
+            filtered_arns.append(candidate_arn)
+        arns = filtered_arns
+
     if not arns:
         logger.warning(
             "No resource ARNs found in CloudTrail event; the remediation policy "
@@ -290,7 +307,10 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         )
         return {}
 
-    resource_arns = _extract_resource_arns(detail.get("resources", []))
+    resource_arns = _extract_resource_arns(
+        detail.get("resources", []),
+        str(detail.get("errorMessage", "")),
+    )
     policy_document = {
         "Version": "2012-10-17",
         "Statement": [
