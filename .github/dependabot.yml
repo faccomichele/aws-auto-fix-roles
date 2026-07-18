@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: terraform
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: pip
+    directory: "/lambdas/github_issue"
+    schedule:
+      interval: weekly
