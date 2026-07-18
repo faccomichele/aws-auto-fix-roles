@@ -50,9 +50,14 @@ resource "aws_sfn_state_machine" "auto_fix" {
         Type = "Choice"
         Choices = [{
           # Skip GitHub issue creation when the policy was already attached.
-          Variable      = "$.auto_fix_result.Payload.attachment_action"
-          StringEquals  = "already_attached"
-          Next          = "NoChangeNeeded"
+          And = [{
+            Variable  = "$.auto_fix_result.Payload.attachment_action"
+            IsPresent = true
+          }, {
+            Variable     = "$.auto_fix_result.Payload.attachment_action"
+            StringEquals = "already_attached"
+          }]
+          Next = "NoChangeNeeded"
         }, {
           # Otherwise the Lambda changed state and we should notify GitHub.
           Variable  = "$.auto_fix_result.Payload.actions_taken[0]"
