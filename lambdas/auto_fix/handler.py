@@ -23,6 +23,7 @@ If nothing was changed the function returns ``{}``.
 
 import os, re
 import json
+import hashlib
 import boto3
 import logging
 from datetime import datetime, timezone
@@ -37,6 +38,9 @@ SSM_PATH_PREFIX: str = os.environ.get(
 
 iam = boto3.client("iam")
 ssm = boto3.client("ssm")
+
+MAX_IAM_POLICY_NAME_LEN = 128
+POLICY_TIMESTAMP_FORMAT = "%Y-%m-%d-%H-%M-%S"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -108,11 +112,49 @@ def _policy_document_canonical(policy_document: dict) -> str:
     return json.dumps(policy_document, sort_keys=True, separators=(",", ":"))
 
 
-def _build_policy_name_prefix(role_name: str, action: str) -> str:
-    """Build the stable prefix used for idempotent policy lookup."""
-    return (
-        f"auto-correction-{_sanitize_policy_segment(role_name)}-"
-        f"{_sanitize_policy_segment(action)}-"
+def _error_message_digest(error_message: str) -> str:
+    """Return a short, stable digest for an error message."""
+    return hashlib.sha256(error_message.encode("utf-8")).hexdigest()[:12]
+
+
+def _build_policy_name_prefix(role_name: str, action: str, error_message: str) -> str:
+    """Build a stable, max-length-safe prefix used for idempotent policy lookup.
+
+    The final policy name appends a UTC timestamp, so this prefix reserves
+    timestamp space up front to ensure the complete name remains within AWS's
+    128-character policy-name limit.
+    """
+    digest = _error_message_digest(error_message)
+    role_segment = _sanitize_policy_segment(role_name)
+    action_segment = _sanitize_policy_segment(action)
+
+    timestamp_len = len(datetime.now(tz=timezone.utc).strftime(POLICY_TIMESTAMP_FORMAT))
+    max_prefix_len = MAX_IAM_POLICY_NAME_LEN - timestamp_len
+
+    prefix_template = "auto-correction-{role}-{action}-{digest}-"
+    prefix = prefix_template.format(
+        role=role_segment,
+        action=action_segment,
+        digest=digest,
+    )
+    if len(prefix) <= max_prefix_len:
+        return prefix
+
+    fixed_overhead = len(prefix_template.format(role="", action="", digest=digest))
+    available = max(2, max_prefix_len - fixed_overhead)
+
+    while len(role_segment) + len(action_segment) > available:
+        if len(role_segment) >= len(action_segment) and len(role_segment) > 1:
+            role_segment = role_segment[:-1]
+        elif len(action_segment) > 1:
+            action_segment = action_segment[:-1]
+        else:
+            break
+
+    return prefix_template.format(
+        role=role_segment,
+        action=action_segment,
+        digest=digest,
     )
 
 
@@ -307,9 +349,11 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         )
         return {}
 
+    error_message = str(detail.get("errorMessage", ""))
+
     resource_arns = _extract_resource_arns(
         detail.get("resources", []),
-        str(detail.get("errorMessage", "")),
+        error_message,
     )
     policy_document = {
         "Version": "2012-10-17",
@@ -323,7 +367,7 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         ],
     }
 
-    policy_name_prefix = _build_policy_name_prefix(role_name, action)
+    policy_name_prefix = _build_policy_name_prefix(role_name, action, error_message)
 
     existing_policy = _find_matching_policy(policy_name_prefix, policy_document)
     if existing_policy is not None:
@@ -331,7 +375,7 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         policy_action = "reused"
         logger.info("Reusing existing policy %s", policy_arn)
     else:
-        timestamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
+        timestamp = datetime.now(tz=timezone.utc).strftime(POLICY_TIMESTAMP_FORMAT)
         policy_name = f"{policy_name_prefix}{timestamp}"
 
         try:
