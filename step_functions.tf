@@ -21,7 +21,7 @@ resource "aws_sfn_state_machine" "auto_fix" {
   }
 
   definition = jsonencode({
-    Comment = "Auto-fix IAM permissions for GitHub Actions OIDC roles that hit AccessDenied"
+    Comment = "Auto-fix IAM permissions for RepositoryURL-tagged IAM roles that hit AccessDenied"
     StartAt = "InvokeAutoFixLambda"
 
     States = {
@@ -45,12 +45,17 @@ resource "aws_sfn_state_machine" "auto_fix" {
         }]
       }
 
-      # ── Step 2: branch on whether a policy was created ────────────────────
+      # ── Step 2: branch on whether the auto-fix Lambda took any action ─────
       CheckAutoFixResult = {
         Type = "Choice"
         Choices = [{
-          # Lambda returns {"policy_name": "..."} only when it acted
-          Variable  = "$.auto_fix_result.Payload.policy_name"
+          # Skip GitHub issue creation when the policy was already attached.
+          Variable      = "$.auto_fix_result.Payload.attachment_action"
+          StringEquals  = "already_attached"
+          Next          = "NoChangeNeeded"
+        }, {
+          # Otherwise the Lambda changed state and we should notify GitHub.
+          Variable  = "$.auto_fix_result.Payload.actions_taken[0]"
           IsPresent = true
           Next      = "InvokeGitHubIssueLambda"
         }]

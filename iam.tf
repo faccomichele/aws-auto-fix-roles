@@ -40,10 +40,29 @@ resource "aws_iam_role_policy" "lambda_auto_fix" {
         Resource = "${aws_cloudwatch_log_group.auto_fix.arn}:*"
       },
       {
+        Sid    = "AllowListAndReadAutoCorrectPolicies"
+        Effect = "Allow"
+        Action = [
+          "iam:ListPolicies",
+          "iam:GetPolicy",
+          "iam:GetPolicyVersion",
+        ]
+        Resource = [
+          "*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/auto-correction-*",
+        ]
+      },
+      {
         Sid    = "AllowGetRole"
         Effect = "Allow"
         Action = ["iam:GetRole"]
         # Scoped to roles in this account only
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+      },
+      {
+        Sid    = "AllowListAttachedAutoCorrectPolicies"
+        Effect = "Allow"
+        Action = ["iam:ListAttachedRolePolicies"]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
       },
       {
