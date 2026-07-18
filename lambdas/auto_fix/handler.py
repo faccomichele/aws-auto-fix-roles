@@ -341,16 +341,15 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         return {}
 
     repo_org, repo_name = repository_info
+    role_name = _clean_role_name_for_reporting(full_role_name)
 
     # ── Auto-fix enabled check ────────────────────────────────────────────────
-    if not _is_auto_fix_enabled(full_role_name):
+    if not _is_auto_fix_enabled(role_name):
         logger.info(
             "Auto-fix is disabled for role '%s' – skipping",
-            full_role_name,
+            role_name,
         )
         return {}
-
-    role_name = _clean_role_name_for_reporting(full_role_name)
 
     # ── Build the allow statement for the denied action ───────────────────────
     action = _build_iam_action(detail.get("eventSource", ""), detail.get("eventName", ""))
