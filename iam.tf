@@ -40,19 +40,6 @@ resource "aws_iam_role_policy" "lambda_auto_fix" {
         Resource = "${aws_cloudwatch_log_group.auto_fix.arn}:*"
       },
       {
-        Sid    = "AllowListAndReadAutoCorrectPolicies"
-        Effect = "Allow"
-        Action = [
-          "iam:ListPolicies",
-          "iam:GetPolicy",
-          "iam:GetPolicyVersion",
-        ]
-        Resource = [
-          "*",
-          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/auto-correction-*",
-        ]
-      },
-      {
         Sid    = "AllowGetRole"
         Effect = "Allow"
         Action = ["iam:GetRole"]
@@ -60,26 +47,24 @@ resource "aws_iam_role_policy" "lambda_auto_fix" {
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
       },
       {
-        Sid    = "AllowListAttachedAutoCorrectPolicies"
+        Sid    = "AllowGetInlineAutoCorrectPolicy"
         Effect = "Allow"
-        Action = ["iam:ListAttachedRolePolicies"]
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
-      },
-      {
-        Sid    = "AllowCreateAutoCorrectPolicy"
-        Effect = "Allow"
-        Action = ["iam:CreatePolicy"]
-        # Restrict creation to the auto-correction naming prefix
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/auto-correction-*"
-      },
-      {
-        Sid      = "AllowAttachAutoCorrectPolicy"
-        Effect   = "Allow"
-        Action   = ["iam:AttachRolePolicy"]
+        Action = ["iam:GetRolePolicy"]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
         Condition = {
-          ArnLike = {
-            "iam:PolicyARN" = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/auto-correction-*"
+          StringLike = {
+            "iam:PolicyName" = "auto-correction-*"
+          }
+        }
+      },
+      {
+        Sid    = "AllowCreateInlineAutoCorrectPolicy"
+        Effect = "Allow"
+        Action = ["iam:PutRolePolicy"]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+        Condition = {
+          StringLike = {
+            "iam:PolicyName" = "auto-correction-*"
           }
         }
       },

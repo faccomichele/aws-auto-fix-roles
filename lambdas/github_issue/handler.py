@@ -2,15 +2,14 @@
 Lambda 2 – github-issue
 ========================
 Called by the Step Functions state machine **only** when Lambda 1 (auto-fix)
-has successfully remediated a role by creating/reusing and/or attaching a
-remediation IAM policy.
+has successfully remediated a role by creating an inline remediation
+IAM policy.
 
 Input (from the Step Function Payload)
 ---------------------------------------
-``{"policy_name": str, "policy_arn": str, "repo_org": str,
+``{"policy_name": str, "repo_org": str,
     "repo_name": str, "role_name": str, "denied_action": str,
-    "policy_action": str, "attachment_action": str,
-    "actions_taken": list[str]}``
+    "policy_action": str, "actions_taken": list[str]}``
 
 Behaviour
 ---------
@@ -150,20 +149,15 @@ def _get_github_installation_token(
 
 def _build_issue_body(
     policy_name: str,
-    policy_arn: str,
     role_name: str,
     repo_org: str,
     repo_name: str,
     denied_action: str,
     policy_action: str,
-    attachment_action: str,
 ) -> str:
     """Render the GitHub issue body from a common template."""
     repository_slug = f"{repo_org}/{repo_name}" if repo_org else repo_name
-    policy_action_text = "created a new policy" if policy_action == "created" else "reused an existing policy"
-    attachment_action_text = (
-        "attached it to the role" if attachment_action == "attached" else "left the attachment unchanged"
-    )
+    policy_action_text = "created a new inline policy" if policy_action == "created" else "left the policy unchanged"
 
     return f"""\
 ## Auto-Correction: IAM Permission Issue Detected
@@ -179,32 +173,29 @@ repository `{repository_slug}`.
 | **IAM Role** | `{role_name}` |
 | **Denied Action** | `{denied_action}` |
 | **Policy Action** | `{policy_action}` |
-| **Attachment Action** | `{attachment_action}` |
-| **Policy Name** | `{policy_name}` |
-| **Policy ARN** | `{policy_arn}` |
+| **Inline Policy Name** | `{policy_name}` |
 
 ### What Happened
 
 A role associated with this repository encountered an `AccessDenied` error while attempting \
 to perform `{denied_action}`. The automation detected this event and \
-automatically {policy_action_text} to grant the missing permission and {attachment_action_text} for the role **`{role_name}`**.
+automatically {policy_action_text} on role **`{role_name}`** to grant the missing permission.
 
 ### Action Required
 
-> ⚠️ The auto-created policy may be broader than necessary.  Please review it \
+> ⚠️ The auto-created inline policy may be broader than necessary. Please review it \
 and follow the steps below.
 
-1. Open the AWS Console and review the permissions in **`{policy_name}`**.
+1. Open the AWS Console and review the inline policy **`{policy_name}`** on role **`{role_name}`**.
 2. Verify that the granted permissions are appropriate and follow the \
 [Principle of Least Privilege](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html#grant-least-privilege).
 3. Update the Infrastructure-as-Code (IaC) to include the **minimal** required \
 permissions permanently.
-4. After the IaC change is deployed, **delete** the auto-created policy \
-`{policy_name}` to avoid duplicate permissions.
+4. After the IaC change is deployed, **delete** the auto-created inline policy \
+`{policy_name}` from role **`{role_name}`** to avoid duplicate permissions.
 
 ### References
 
-- Policy ARN: `{policy_arn}`
 - [AWS IAM Best Practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)
 
 ---
@@ -257,13 +248,11 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
     logger.info("Received event: %s", json.dumps(event))
 
     policy_name: str = event.get("policy_name", "")
-    policy_arn: str = event.get("policy_arn", "")
     repo_org: str = event.get("repo_org", GITHUB_ORG)
     repo_name: str = event.get("repo_name", "")
     role_name: str = event.get("role_name", "")
     denied_action: str = event.get("denied_action", "")
     policy_action: str = event.get("policy_action", "created")
-    attachment_action: str = event.get("attachment_action", "attached")
 
     if not policy_name or not repo_name:
         logger.warning(
@@ -283,13 +272,11 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
     issue_title = f"[Auto-Correction] IAM permission remediated: {policy_name}"
     issue_body = _build_issue_body(
         policy_name=policy_name,
-        policy_arn=policy_arn,
         role_name=role_name,
         repo_org=repo_org,
         repo_name=repo_name,
         denied_action=denied_action,
         policy_action=policy_action,
-        attachment_action=attachment_action,
     )
 
     issue_url = _create_github_issue(

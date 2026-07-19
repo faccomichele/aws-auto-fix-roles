@@ -4,7 +4,7 @@ AWS focused automation to expand IAM roles permission automatically, for GitHub 
 
 ## Overview
 
-`aws-auto-roles-fix` detects `AccessDenied` errors produced by GitHub Actions OIDC roles, automatically creates and attaches a remediation IAM policy, and opens a GitHub issue on the affected repository so engineers can review and permanently fix the missing permission.
+`aws-auto-roles-fix` detects `AccessDenied` errors produced by GitHub Actions OIDC roles, automatically creates a remediation inline IAM policy on the target role, and opens a GitHub issue on the affected repository so engineers can review and permanently fix the missing permission.
 
 ### How It Works
 
@@ -18,9 +18,8 @@ EventBridge Rule
 Step Functions State Machine
         │
         ├─► Lambda: auto-fix
-        │     • Verifies the role uses the GitHub Actions OIDC trust policy
-        │     • Creates an IAM policy (auto-correction-<role>-<timestamp>)
-        │     • Attaches it to the role
+        │     • Verifies the role has a RepositoryURL tag
+        │     • Creates an inline IAM policy on the role (auto-correction-*) if missing
         │
         └─► Lambda: github-issue
                   • Retrieves GitHub App credentials from SSM Parameter Store
@@ -35,8 +34,8 @@ Step Functions State Machine
 | **CloudTrail Trail** | Regional trail that records all read/write management events and writes logs to the dedicated S3 bucket |
 | **S3 Bucket (CloudTrail)** | Stores CloudTrail log files; objects are automatically deleted after 365 days |
 | **EventBridge Rule** | Captures every CloudTrail management event with `errorCode: AccessDenied` or `Client.UnauthorizedOperation` |
-| **Step Functions State Machine** | Orchestrates the two Lambdas; branches on whether a policy was actually created |
-| **Lambda – auto-fix** | Safety-gated remediation: only acts on roles whose trust policy allows `sts:AssumeRoleWithWebIdentity` from the GitHub Actions OIDC provider |
+| **Step Functions State Machine** | Orchestrates the two Lambdas; branches on whether a new inline policy was actually created |
+| **Lambda – auto-fix** | Safety-gated remediation: only acts on roles with a valid `RepositoryURL` tag and matching environment filter |
 | **Lambda – github-issue** | Opens a GitHub issue with a summary table and action items on the affected repository |
 | **SSM Parameters** | Store the GitHub App client id, installation id, and private key |
 | **IAM Roles & Policies** | Least-privilege execution roles for Lambda, Step Functions, and EventBridge |
@@ -135,10 +134,9 @@ cd lambdas/github_issue/build && zip -r ../../github_issue.zip . && cd -
 
 ## Safety
 
-- The auto-fix Lambda only remediates roles whose trust policy contains `sts:AssumeRoleWithWebIdentity` from `token.actions.githubusercontent.com`. All other identities are silently skipped.
-- IAM policy creation is restricted to the `auto-correction-*` naming prefix.
-- `AttachRolePolicy` is conditioned on the policy ARN matching the same prefix.
-- The GitHub issue includes a ⚠️ reminder to review the auto-created policy and replace it with minimal permanent permissions.
+- The auto-fix Lambda only remediates roles that include a `RepositoryURL` tag and match the configured environment name filter.
+- Inline policy creation is restricted to policy names matching `auto-correction-*`.
+- The GitHub issue includes a ⚠️ reminder to review the auto-created inline policy and replace it with minimal permanent permissions.
 
 ## License
 
