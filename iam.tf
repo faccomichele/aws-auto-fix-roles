@@ -47,18 +47,19 @@ resource "aws_iam_role_policy" "lambda_auto_fix" {
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
       },
       {
-        Sid    = "AllowGetInlineAutoCorrectPolicy"
+        Sid    = "AllowListInlinePolicies"
+        Effect = "Allow"
+        Action = ["iam:ListRolePolicies"]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+      },
+      {
+        Sid    = "AllowReadInlinePolicies"
         Effect = "Allow"
         Action = ["iam:GetRolePolicy"]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
-        Condition = {
-          StringLike = {
-            "iam:PolicyName" = "auto-correction-*"
-          }
-        }
       },
       {
-        Sid    = "AllowCreateInlineAutoCorrectPolicy"
+        Sid    = "AllowCreateAndUpdateInlinePolicies"
         Effect = "Allow"
         Action = ["iam:PutRolePolicy"]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
