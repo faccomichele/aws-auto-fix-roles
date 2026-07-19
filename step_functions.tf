@@ -49,19 +49,9 @@ resource "aws_sfn_state_machine" "auto_fix" {
       CheckAutoFixResult = {
         Type = "Choice"
         Choices = [{
-          # Skip GitHub issue creation when the policy was already attached.
-          And = [{
-            Variable  = "$.auto_fix_result.Payload.attachment_action"
-            IsPresent = true
-          }, {
-            Variable     = "$.auto_fix_result.Payload.attachment_action"
-            StringEquals = "already_attached"
-          }]
-          Next = "NoChangeNeeded"
-        }, {
-          # Otherwise the Lambda changed state and we should notify GitHub.
+          # Notify GitHub only when a new inline policy was created.
           Variable  = "$.auto_fix_result.Payload.actions_taken[0]"
-          IsPresent = true
+          StringEquals = "inline_policy_created"
           Next      = "InvokeGitHubIssueLambda"
         }]
         Default = "NoChangeNeeded"

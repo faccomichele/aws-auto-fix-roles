@@ -13,10 +13,9 @@ function returns an empty dict ``{}``.
 
 Happy-path return value
 -----------------------
-``{"policy_name": str, "policy_arn": str, "repo_org": str,
+``{"policy_name": str, "repo_org": str,
     "repo_name": str, "role_name": str, "denied_action": str,
-    "policy_action": str, "attachment_action": str,
-    "actions_taken": list[str]}``
+    "policy_action": str, "actions_taken": list[str]}``
 
 If nothing was changed the function returns ``{}``.
 """
@@ -26,7 +25,7 @@ import json
 import hashlib
 import boto3
 import logging
-from datetime import datetime, timezone
+from urllib.parse import unquote
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -40,7 +39,6 @@ iam = boto3.client("iam")
 ssm = boto3.client("ssm")
 
 MAX_IAM_POLICY_NAME_LEN = 128
-POLICY_TIMESTAMP_FORMAT = "%Y-%m-%d-%H-%M-%S"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,36 +122,29 @@ def _policy_document_canonical(policy_document: dict) -> str:
     return json.dumps(policy_document, sort_keys=True, separators=(",", ":"))
 
 
-def _error_message_digest(error_message: str) -> str:
-    """Return a short, stable digest for an error message."""
-    return hashlib.sha256(error_message.encode("utf-8")).hexdigest()[:12]
+def _policy_document_digest(policy_document: dict) -> str:
+    """Return a short digest for a policy document."""
+    canonical = _policy_document_canonical(policy_document)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
-def _build_policy_name_prefix(role_name: str, action: str, error_message: str) -> str:
-    """Build a stable, max-length-safe prefix used for idempotent policy lookup.
-
-    The final policy name appends a UTC timestamp, so this prefix reserves
-    timestamp space up front to ensure the complete name remains within AWS's
-    128-character policy-name limit.
-    """
-    digest = _error_message_digest(error_message)
+def _build_inline_policy_name(role_name: str, action: str, policy_document: dict) -> str:
+    """Build a deterministic, max-length-safe inline policy name."""
+    digest = _policy_document_digest(policy_document)
     role_segment = _sanitize_policy_segment(role_name)
     action_segment = _sanitize_policy_segment(action)
 
-    timestamp_len = len(datetime.now(tz=timezone.utc).strftime(POLICY_TIMESTAMP_FORMAT))
-    max_prefix_len = MAX_IAM_POLICY_NAME_LEN - timestamp_len
-
-    prefix_template = "auto-correction-{role}-{action}-{digest}-"
-    prefix = prefix_template.format(
+    name_template = "auto-correction-{role}-{action}-{digest}"
+    name = name_template.format(
         role=role_segment,
         action=action_segment,
         digest=digest,
     )
-    if len(prefix) <= max_prefix_len:
-        return prefix
+    if len(name) <= MAX_IAM_POLICY_NAME_LEN:
+        return name
 
-    fixed_overhead = len(prefix_template.format(role="", action="", digest=digest))
-    available = max(2, max_prefix_len - fixed_overhead)
+    fixed_overhead = len(name_template.format(role="", action="", digest=digest))
+    available = max(2, MAX_IAM_POLICY_NAME_LEN - fixed_overhead)
 
     while len(role_segment) + len(action_segment) > available:
         if len(role_segment) >= len(action_segment) and len(role_segment) > 1:
@@ -163,52 +154,45 @@ def _build_policy_name_prefix(role_name: str, action: str, error_message: str) -
         else:
             break
 
-    return prefix_template.format(
+    return name_template.format(
         role=role_segment,
         action=action_segment,
         digest=digest,
     )
 
 
-def _find_matching_policy(policy_name_prefix: str, policy_document: dict) -> tuple[str, str] | None:
-    """Return the latest matching local policy ARN/name whose document is identical."""
-    matches: list[tuple[datetime, str, str]] = []
-    expected_document = _policy_document_canonical(policy_document)
-
-    paginator = iam.get_paginator("list_policies")
-    for page in paginator.paginate(Scope="Local"):
-        for policy in page.get("Policies", []):
-            if not policy.get("PolicyName", "").startswith(policy_name_prefix):
-                continue
-
-            try:
-                policy_version = iam.get_policy_version(
-                    PolicyArn=policy["Arn"],
-                    VersionId=policy["DefaultVersionId"],
-                )["PolicyVersion"]["Document"]
-            except Exception:
-                logger.exception("Failed to inspect IAM policy '%s'", policy.get("Arn", ""))
-                continue
-
-            if _policy_document_canonical(policy_version) == expected_document:
-                matches.append((policy["CreateDate"], policy["PolicyName"], policy["Arn"]))
-
-    if not matches:
-        return None
-
-    matches.sort(key=lambda item: item[0], reverse=True)
-    _, policy_name, policy_arn = matches[0]
-    return policy_name, policy_arn
+def _parse_iam_policy_document(policy_document: object) -> dict | None:
+    """Parse IAM policy documents returned by IAM APIs into dict form."""
+    if isinstance(policy_document, dict):
+        return policy_document
+    if isinstance(policy_document, str):
+        try:
+            return json.loads(unquote(policy_document))
+        except json.JSONDecodeError:
+            logger.warning("Unable to parse IAM policy document JSON")
+            return None
+    return None
 
 
-def _is_policy_attached_to_role(role_name: str, policy_arn: str) -> bool:
-    """Return ``True`` when the role already has the policy attached."""
-    paginator = iam.get_paginator("list_attached_role_policies")
-    for page in paginator.paginate(RoleName=role_name):
-        for policy in page.get("AttachedPolicies", []):
-            if policy.get("PolicyArn") == policy_arn:
-                return True
-    return False
+def _inline_policy_exists(role_name: str, policy_name: str, expected_document: dict) -> bool:
+    """Return ``True`` when an inline policy already exists with identical document."""
+    try:
+        response = iam.get_role_policy(RoleName=role_name, PolicyName=policy_name)
+    except iam.exceptions.NoSuchEntityException:
+        return False
+    except Exception:
+        logger.exception(
+            "Failed to retrieve inline policy '%s' on role '%s'",
+            policy_name,
+            role_name,
+        )
+        raise
+
+    current_document = _parse_iam_policy_document(response.get("PolicyDocument"))
+    if current_document is None:
+        return False
+
+    return _policy_document_canonical(current_document) == _policy_document_canonical(expected_document)
 
 
 def _build_iam_action(event_source: str, event_name: str) -> str:
@@ -292,7 +276,7 @@ def _is_auto_fix_enabled(role_name: str) -> bool:
 
 
 def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
-    """Process a CloudTrail AccessDenied event and auto-attach a remediation policy."""
+    """Process a CloudTrail AccessDenied event and create an inline remediation policy."""
     logger.info("Received event: %s", json.dumps(event))
 
     detail = event.get("detail", {})
@@ -332,8 +316,6 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         )
         return {}
 
-    account_id: str = session_issuer.get("accountId") or role_arn.split(":")[4]
-
     # ── Safety gate: RepositoryURL tag must exist ────────────────────────────
     repository_info = _get_role_repository_url(full_role_name)
     if repository_info is None:
@@ -362,11 +344,9 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         )
         return {}
 
-    error_message = str(detail.get("errorMessage", ""))
-
     resource_arns = _extract_resource_arns(
         detail.get("resources", []),
-        error_message,
+        str(detail.get("errorMessage", "")),
     )
     policy_document = {
         "Version": "2012-10-17",
@@ -380,60 +360,32 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         ],
     }
 
-    policy_name_prefix = _build_policy_name_prefix(role_name, action, error_message)
+    policy_name = _build_inline_policy_name(role_name, action, policy_document)
 
-    existing_policy = _find_matching_policy(policy_name_prefix, policy_document)
-    if existing_policy is not None:
-        policy_name, policy_arn = existing_policy
-        policy_action = "reused"
-        logger.info("Reusing existing policy %s", policy_arn)
-    else:
-        timestamp = datetime.now(tz=timezone.utc).strftime(POLICY_TIMESTAMP_FORMAT)
-        policy_name = f"{policy_name_prefix}{timestamp}"
-
-        try:
-            response = iam.create_policy(
-                PolicyName=policy_name,
-                PolicyDocument=json.dumps(policy_document),
-                Description=(
-                    f"Auto-correction for role {role_name} – "
-                    f"AccessDenied on {action or 'unknown'} – created {timestamp} UTC"
-                ),
-            )
-            policy_arn = response["Policy"]["Arn"]
-            policy_action = "created"
-            logger.info("Created policy: %s", policy_arn)
-        except Exception:
-            logger.exception("Failed to create IAM policy '%s'", policy_name)
-            raise
-
-    attachment_action = "already_attached"
-    if not _is_policy_attached_to_role(full_role_name, policy_arn):
-        try:
-            iam.attach_role_policy(RoleName=full_role_name, PolicyArn=policy_arn)
-            attachment_action = "attached"
-            logger.info("Attached policy %s to role %s", policy_arn, full_role_name)
-        except Exception:
-            logger.exception("Failed to attach policy '%s' to role '%s'", policy_arn, full_role_name)
-            raise
-
-    if policy_action == "reused" and attachment_action == "already_attached":
+    if _inline_policy_exists(full_role_name, policy_name, policy_document):
+        logger.info(
+            "Inline policy '%s' already exists on role '%s'; no change needed",
+            policy_name,
+            full_role_name,
+        )
         return {}
 
-    actions_taken: list[str] = []
-    if policy_action == "created":
-        actions_taken.append("policy_created")
-    elif policy_action == "reused":
-        actions_taken.append("policy_reused")
+    try:
+        iam.put_role_policy(
+            RoleName=full_role_name,
+            PolicyName=policy_name,
+            PolicyDocument=json.dumps(policy_document),
+        )
+        logger.info("Created inline policy '%s' on role '%s'", policy_name, full_role_name)
+    except Exception:
+        logger.exception("Failed to create inline policy '%s' on role '%s'", policy_name, full_role_name)
+        raise
 
-    if attachment_action == "attached":
-        actions_taken.append("policy_attached")
+    actions_taken: list[str] = ["inline_policy_created"]
 
     return {
         "policy_name": policy_name,
-        "policy_arn": policy_arn,
-        "policy_action": policy_action,
-        "attachment_action": attachment_action,
+        "policy_action": "created",
         "actions_taken": actions_taken,
         "repo_org": repo_org,
         "repo_name": repo_name,
