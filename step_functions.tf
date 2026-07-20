@@ -222,7 +222,7 @@ resource "aws_sfn_state_machine" "auto_fix" {
 
       # ── Step 2: branch on whether the auto-fix Lambda took any action ─────
       CheckAutoFixResult = {
-        Type = "Choice"
+        Type          = "Choice"
         Choices = [{
           And = [
             {
