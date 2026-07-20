@@ -14,15 +14,10 @@ resource "aws_sfn_state_machine" "auto_fix" {
 
     States = {
       BuildCircuitContext = {
-        Type = "Pass"
-        Parameters = {
-          "RoleArn.$"        = "$.detail.userIdentity.sessionContext.sessionIssuer.arn"
-          "NowEpoch.$"       = "States.TimestampToEpochSeconds($$.State.EnteredTime)"
-          "OpenUntilEpoch.$" = "States.MathAdd(States.TimestampToEpochSeconds($$.State.EnteredTime), 86400)"
-          "FailureThreshold" = 3
-        }
-        ResultPath = "$.circuit"
-        Next       = "GetRemediationLock"
+        Type          = "Pass"
+        QueryLanguage = "JSONata"
+        Output        = "{% $merge([$states.input, {'circuit': {'RoleArn': $states.input.detail.userIdentity.sessionContext.sessionIssuer.arn, 'NowEpoch': $floor($toMillis($states.context.State.EnteredTime) / 1000), 'OpenUntilEpoch': $floor($toMillis($states.context.State.EnteredTime) / 1000) + 86400, 'FailureThreshold': 3}}]) %}"
+        Next          = "GetRemediationLock"
       }
 
       GetRemediationLock = {
