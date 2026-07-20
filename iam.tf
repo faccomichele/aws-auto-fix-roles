@@ -47,25 +47,28 @@ resource "aws_iam_role_policy" "lambda_auto_fix" {
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
       },
       {
-        Sid    = "AllowListInlinePolicies"
-        Effect = "Allow"
-        Action = ["iam:ListRolePolicies"]
+        Sid      = "AllowListInlinePolicies"
+        Effect   = "Allow"
+        Action   = ["iam:ListRolePolicies"]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
       },
       {
-        Sid    = "AllowReadInlinePolicies"
-        Effect = "Allow"
-        Action = ["iam:GetRolePolicy"]
+        Sid      = "AllowReadInlinePolicies"
+        Effect   = "Allow"
+        Action   = ["iam:GetRolePolicy"]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
       },
       {
-        Sid    = "AllowCreateAndUpdateInlinePolicies"
-        Effect = "Allow"
-        Action = ["iam:PutRolePolicy"]
+        Sid      = "AllowCreateAndUpdateInlinePolicies"
+        Effect   = "Allow"
+        Action   = ["iam:PutRolePolicy"]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
         Condition = {
           StringLike = {
-            "iam:PolicyName" = "auto-correction-*"
+            "iam:PolicyName" = [
+              "auto-correction-*",
+              "${local.project_name}-auto-fix-*",
+            ]
           }
         }
       },
@@ -124,9 +127,9 @@ resource "aws_iam_role_policy" "lambda_github_issue" {
         Resource = "${aws_cloudwatch_log_group.github_issue.arn}:*"
       },
       {
-        Sid      = "AllowSSMGetGitHubAppCredentials"
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter"]
+        Sid    = "AllowSSMGetGitHubAppCredentials"
+        Effect = "Allow"
+        Action = ["ssm:GetParameter"]
         Resource = [
           "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.github_app_client_id_ssm_path}",
           "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.github_app_installation_id_ssm_path}",
@@ -175,6 +178,15 @@ resource "aws_iam_role_policy" "step_functions" {
           aws_lambda_function.auto_fix.arn,
           aws_lambda_function.github_issue.arn,
         ]
+      },
+      {
+        Sid    = "AllowCircuitBreakerStateStore"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:UpdateItem",
+        ]
+        Resource = aws_dynamodb_table.remediation_locks.arn
       },
       {
         Sid    = "AllowSFNCloudWatchLogs"

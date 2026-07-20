@@ -17,9 +17,14 @@ EventBridge Rule
         ▼
 Step Functions State Machine
         │
+        ├─► DynamoDB circuit-breaker check
+        │     • Reads role failure state from RemediationLocks
+        │     • Fails fast when the circuit is open
+        │
         ├─► Lambda: auto-fix
         │     • Verifies the role has a RepositoryURL tag
         │     • Creates an inline IAM policy on the role (auto-correction-*) if missing
+        │     • On hard IAM limits, increments failure counter in DynamoDB
         │
         └─► Lambda: github-issue
                   • Retrieves GitHub App credentials from SSM Parameter Store
@@ -34,10 +39,12 @@ Step Functions State Machine
 | **CloudTrail Trail** | Regional trail that records all read/write management events and writes logs to the dedicated S3 bucket |
 | **S3 Bucket (CloudTrail)** | Stores CloudTrail log files; objects are automatically deleted after 365 days |
 | **EventBridge Rule** | Captures every CloudTrail management event with `errorCode: AccessDenied` or `Client.UnauthorizedOperation` |
-| **Step Functions State Machine** | Orchestrates the two Lambdas; branches on whether a new inline policy was actually created |
+| **Step Functions State Machine** | Enforces circuit-breaker gating, orchestrates remediation, and fails executions on remediation/controller failures |
+| **DynamoDB (RemediationLocks)** | Tracks role-level remediation failure counts and TTL-based cool-down windows |
 | **Lambda – auto-fix** | Safety-gated remediation: only acts on roles with a valid `RepositoryURL` tag and matching environment filter |
 | **Lambda – github-issue** | Opens a GitHub issue with a summary table and action items on the affected repository |
 | **SSM Parameters** | Store the GitHub App client id, installation id, and private key |
+| **CloudWatch Alarm + SNS** | Triggers notification when Step Function failures reach 5+ in a 1-hour period |
 | **IAM Roles & Policies** | Least-privilege execution roles for Lambda, Step Functions, and EventBridge |
 | **CloudWatch Log Groups** | Centralised logging for the state machine and both Lambdas |
 
@@ -123,6 +130,7 @@ cd lambdas/github_issue/build && zip -r ../../github_issue.zip . && cd -
 | Variable | Type | Description |
 |---|---|---|
 | `tags` | `map(string)` | Map of tags to assign to all resources. Must include a `Project` key. |
+| `sfn_failure_alert_email` | `string` | Optional email endpoint subscribed to Step Functions failure alerts SNS topic. |
 
 ## Outputs
 
@@ -131,11 +139,14 @@ cd lambdas/github_issue/build && zip -r ../../github_issue.zip . && cd -
 | `github_app_client_id_ssm_path` | SSM path used to store the GitHub App client id |
 | `github_app_installation_id_ssm_path` | SSM path used to store the GitHub App installation id |
 | `github_app_private_key_ssm_path` | SSM path used to store the GitHub App private key |
+| `sfn_failure_alert_topic_arn` | SNS topic ARN used by Step Functions failure alarms |
 
 ## Safety
 
 - The auto-fix Lambda only remediates roles that include a `RepositoryURL` tag and match the configured environment name filter.
-- Inline policy creation is restricted to policy names matching `auto-correction-*`.
+- Inline policy creation is restricted to policy names matching `auto-correction-*` or `${project}-auto-fix-*`.
+- The workflow uses a role-level circuit breaker (DynamoDB + TTL) and fails fast when the circuit is open.
+- Hard remediation failures increment role failure counters and still fail the Step Function execution.
 - The GitHub issue includes a ⚠️ reminder to review the auto-created inline policy and replace it with minimal permanent permissions.
 
 ## License

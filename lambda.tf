@@ -1,17 +1,5 @@
 # ── Lambda: auto-fix ─────────────────────────────────────────────────────────
 
-resource "aws_cloudwatch_log_group" "auto_fix" {
-  name              = "/aws/lambda/${local.project_name}-auto-fix-${local.environment}"
-  retention_in_days = local.log_retention_in_days
-
-  tags = merge(local.tags,
-    {
-      Name = "/aws/lambda/${local.project_name}-auto-fix-${local.environment}"
-      File = "lambda.tf"
-    }
-  )
-}
-
 resource "aws_lambda_function" "auto_fix" {
   function_name    = "${local.project_name}-auto-fix-${local.environment}"
   filename         = "${path.module}/lambdas/auto_fix.zip"
@@ -23,8 +11,8 @@ resource "aws_lambda_function" "auto_fix" {
 
   environment {
     variables = {
-      ENVIRONMENTS      = jsonencode([local.environment])
-      SSM_PATH_PREFIX   = "/${local.organization}/${local.project_name}/${local.environment}/auto-fix/"
+      ENVIRONMENTS    = jsonencode([local.environment])
+      SSM_PATH_PREFIX = "/${local.organization}/${local.project_name}/${local.environment}/auto-fix/"
     }
   }
 
@@ -39,19 +27,6 @@ resource "aws_lambda_function" "auto_fix" {
 }
 
 # ── Lambda: github-issue ──────────────────────────────────────────────────────
-
-resource "aws_cloudwatch_log_group" "github_issue" {
-  name              = "/aws/lambda/${local.project_name}-github-issue-${local.environment}"
-  retention_in_days = local.log_retention_in_days
-
-  tags = merge(local.tags,
-    {
-      Name = "/aws/lambda/${local.project_name}-github-issue-${local.environment}"
-      File = "lambda.tf"
-    }
-  )
-}
-
 
 # Lambda Layer for dependencies
 resource "aws_lambda_layer_version" "github_issue" {
@@ -75,13 +50,13 @@ resource "aws_lambda_function" "github_issue" {
   layers = [aws_lambda_layer_version.github_issue.arn]
 
   environment {
-      variables = {
-        GITHUB_APP_CLIENT_ID_SSM_PATH       = local.github_app_client_id_ssm_path
-        GITHUB_APP_INSTALLATION_ID_SSM_PATH = local.github_app_installation_id_ssm_path
-        GITHUB_APP_PRIVATE_KEY_SSM_PATH     = local.github_app_private_key_ssm_path
-        GITHUB_ORG                          = local.organization
-      }
+    variables = {
+      GITHUB_APP_CLIENT_ID_SSM_PATH       = local.github_app_client_id_ssm_path
+      GITHUB_APP_INSTALLATION_ID_SSM_PATH = local.github_app_installation_id_ssm_path
+      GITHUB_APP_PRIVATE_KEY_SSM_PATH     = local.github_app_private_key_ssm_path
+      GITHUB_ORG                          = local.organization
     }
+  }
 
   depends_on = [aws_cloudwatch_log_group.github_issue]
 
