@@ -108,30 +108,8 @@ resource "aws_sfn_state_machine" "auto_fix" {
         Catch = [{
           ErrorEquals = ["States.ALL"]
           ResultPath  = "$.error"
-          Next        = "ClassifyAutoFixFailure"
+          Next        = "IncrementFailureCount"
         }]
-      }
-
-      ClassifyAutoFixFailure = {
-        Type = "Choice"
-        Choices = [{
-          Or = [
-            {
-              Variable      = "$.error.Cause"
-              StringMatches = "*LimitExceeded*"
-            },
-            {
-              Variable      = "$.error.Cause"
-              StringMatches = "*policy size*"
-            },
-            {
-              Variable      = "$.error.Cause"
-              StringMatches = "*PoliciesPerRole*"
-            }
-          ]
-          Next = "IncrementFailureCount"
-        }]
-        Default = "AutoFixFailed"
       }
 
       IncrementFailureCount = {
@@ -259,12 +237,6 @@ resource "aws_sfn_state_machine" "auto_fix" {
       # ── Terminal states ───────────────────────────────────────────────────
       NoChangeNeeded = {
         Type = "Succeed"
-      }
-
-      AutoFixFailed = {
-        Type  = "Fail"
-        Error = "AutoFixFailed"
-        Cause = "The auto-fix Lambda raised an unhandled exception"
       }
 
       GitHubIssueFailed = {
