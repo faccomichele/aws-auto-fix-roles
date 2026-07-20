@@ -42,35 +42,18 @@ resource "aws_iam_role_policy" "lambda_auto_fix" {
       {
         Sid    = "AllowGetRole"
         Effect = "Allow"
-        Action = ["iam:GetRole"]
-        # Scoped to roles in this account only
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
-      },
-      {
-        Sid      = "AllowListInlinePolicies"
-        Effect   = "Allow"
-        Action   = ["iam:ListRolePolicies"]
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
-      },
-      {
-        Sid      = "AllowReadInlinePolicies"
-        Effect   = "Allow"
-        Action   = ["iam:GetRolePolicy"]
+        Action = [
+          "iam:GetRole",
+          "iam:ListRolePolicies",
+          "iam:GetRolePolicy"
+        ]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
       },
       {
         Sid      = "AllowCreateAndUpdateInlinePolicies"
         Effect   = "Allow"
         Action   = ["iam:PutRolePolicy"]
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
-        Condition = {
-          StringLike = {
-            "iam:PolicyName" = [
-              "auto-correction-*",
-              "${local.project_name}-auto-fix-*",
-            ]
-          }
-        }
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*/policy/auto-correction-*"
       },
       {
         Sid    = "AllowSSMAutoFixParameters"
