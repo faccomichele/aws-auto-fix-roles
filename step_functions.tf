@@ -1,15 +1,3 @@
-resource "aws_cloudwatch_log_group" "sfn" {
-  name              = "/aws/states/${local.project_name}/${local.environment}"
-  retention_in_days = local.log_retention_in_days
-
-  tags = merge(local.tags,
-    {
-      Name = "/aws/states/${local.project_name}/${local.environment}"
-      File = "step_functions.tf"
-    }
-  )
-}
-
 resource "aws_sfn_state_machine" "auto_fix" {
   name     = "${local.project_name}-state-machine-${local.environment}"
   role_arn = aws_iam_role.step_functions.arn
@@ -22,9 +10,93 @@ resource "aws_sfn_state_machine" "auto_fix" {
 
   definition = jsonencode({
     Comment = "Auto-fix IAM permissions for RepositoryURL-tagged IAM roles that hit AccessDenied"
-    StartAt = "InvokeAutoFixLambda"
+    StartAt = "BuildCircuitContext"
 
     States = {
+      BuildCircuitContext = {
+        Type = "Pass"
+        Parameters = {
+          "RoleArn.$"        = "$.detail.userIdentity.sessionContext.sessionIssuer.arn"
+          "NowEpoch.$"       = "States.TimestampToEpochSeconds($$.State.EnteredTime)"
+          "OpenUntilEpoch.$" = "States.MathAdd(States.TimestampToEpochSeconds($$.State.EnteredTime), 86400)"
+          "FailureThreshold" = 3
+        }
+        ResultPath = "$.circuit"
+        Next       = "GetRemediationLock"
+      }
+
+      GetRemediationLock = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::dynamodb:getItem"
+        Parameters = {
+          TableName = aws_dynamodb_table.remediation_locks.name
+          Key = {
+            RoleArn = {
+              "S.$" = "$.circuit.RoleArn"
+            }
+          }
+          ConsistentRead = true
+        }
+        ResultPath = "$.lock"
+        Next       = "LockHasCircuitFields"
+      }
+
+      LockHasCircuitFields = {
+        Type = "Choice"
+        Choices = [{
+          And = [
+            {
+              Variable  = "$.lock.Item.FailureCount.N"
+              IsPresent = true
+            },
+            {
+              Variable  = "$.lock.Item.ExpirationTTL.N"
+              IsPresent = true
+            }
+          ]
+          Next = "NormalizeExistingCircuit"
+        }]
+        Default = "InvokeAutoFixLambda"
+      }
+
+      NormalizeExistingCircuit = {
+        Type = "Pass"
+        Parameters = {
+          "FailureCount.$"  = "States.StringToJson($.lock.Item.FailureCount.N)"
+          "ExpirationTTL.$" = "States.StringToJson($.lock.Item.ExpirationTTL.N)"
+        }
+        ResultPath = "$.circuit_state"
+        Next       = "CircuitIsOpen"
+      }
+
+      CircuitIsOpen = {
+        Type = "Choice"
+        Choices = [{
+          And = [
+            {
+              Variable                 = "$.circuit_state.FailureCount"
+              NumericGreaterThanEquals = 3
+            },
+            {
+              Variable           = "$.circuit_state.ExpirationTTL"
+              NumericGreaterThan = 0
+            },
+            {
+              Variable               = "$.circuit_state.ExpirationTTL"
+              NumericGreaterThanPath = "$.circuit.NowEpoch"
+            }
+          ]
+          Next = "CircuitOpen"
+        }]
+        Default = "InvokeAutoFixLambda"
+      }
+
+      CircuitOpen = {
+        Type  = "Fail"
+        Error = "CircuitOpen"
+        Cause = "Circuit breaker is open for this role; remediation skipped"
+      }
+
       # ── Step 1: call the auto-fix Lambda ──────────────────────────────────
       InvokeAutoFixLambda = {
         Type     = "Task"
@@ -41,8 +113,116 @@ resource "aws_sfn_state_machine" "auto_fix" {
         Catch = [{
           ErrorEquals = ["States.ALL"]
           ResultPath  = "$.error"
-          Next        = "AutoFixFailed"
+          Next        = "ClassifyAutoFixFailure"
         }]
+      }
+
+      ClassifyAutoFixFailure = {
+        Type = "Choice"
+        Choices = [{
+          Or = [
+            {
+              Variable      = "$.error.Cause"
+              StringMatches = "*LimitExceeded*"
+            },
+            {
+              Variable      = "$.error.Cause"
+              StringMatches = "*policy size*"
+            },
+            {
+              Variable      = "$.error.Cause"
+              StringMatches = "*PoliciesPerRole*"
+            }
+          ]
+          Next = "IncrementFailureCount"
+        }]
+        Default = "AutoFixFailed"
+      }
+
+      IncrementFailureCount = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::dynamodb:updateItem"
+        Parameters = {
+          TableName = aws_dynamodb_table.remediation_locks.name
+          Key = {
+            RoleArn = {
+              "S.$" = "$.circuit.RoleArn"
+            }
+          }
+          UpdateExpression = "ADD FailureCount :inc SET LastFailureEpoch = :now"
+          ExpressionAttributeValues = {
+            ":inc" = {
+              N = "1"
+            }
+            ":now" = {
+              "N.$" = "States.Format('{}', $.circuit.NowEpoch)"
+            }
+          }
+        }
+        ResultPath = "$.lock_update"
+        Next       = "GetUpdatedLock"
+      }
+
+      GetUpdatedLock = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::dynamodb:getItem"
+        Parameters = {
+          TableName = aws_dynamodb_table.remediation_locks.name
+          Key = {
+            RoleArn = {
+              "S.$" = "$.circuit.RoleArn"
+            }
+          }
+          ConsistentRead = true
+        }
+        ResultPath = "$.updated_lock"
+        Next       = "NormalizeUpdatedLock"
+      }
+
+      NormalizeUpdatedLock = {
+        Type = "Pass"
+        Parameters = {
+          "FailureCount.$" = "States.StringToJson($.updated_lock.Item.FailureCount.N)"
+        }
+        ResultPath = "$.updated_circuit"
+        Next       = "FailureThresholdReached"
+      }
+
+      FailureThresholdReached = {
+        Type = "Choice"
+        Choices = [{
+          Variable                 = "$.updated_circuit.FailureCount"
+          NumericGreaterThanEquals = 3
+          Next                     = "SetCircuitTTL"
+        }]
+        Default = "AutoFixHardLimitFailed"
+      }
+
+      SetCircuitTTL = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::dynamodb:updateItem"
+        Parameters = {
+          TableName = aws_dynamodb_table.remediation_locks.name
+          Key = {
+            RoleArn = {
+              "S.$" = "$.circuit.RoleArn"
+            }
+          }
+          UpdateExpression = "SET ExpirationTTL = :ttl"
+          ExpressionAttributeValues = {
+            ":ttl" = {
+              "N.$" = "States.Format('{}', $.circuit.OpenUntilEpoch)"
+            }
+          }
+        }
+        ResultPath = "$.ttl_update"
+        Next       = "AutoFixHardLimitFailed"
+      }
+
+      AutoFixHardLimitFailed = {
+        Type  = "Fail"
+        Error = "AutoFixHardLimitFailed"
+        Cause = "Auto-fix failed due to an IAM hard limit; failure count recorded"
       }
 
       # ── Step 2: branch on whether the auto-fix Lambda took any action ─────
@@ -50,9 +230,9 @@ resource "aws_sfn_state_machine" "auto_fix" {
         Type = "Choice"
         Choices = [{
           # Notify GitHub only when a new inline policy was created.
-          Variable  = "$.auto_fix_result.Payload.actions_taken[0]"
+          Variable     = "$.auto_fix_result.Payload.actions_taken[0]"
           StringEquals = "inline_policy_created"
-          Next      = "InvokeGitHubIssueLambda"
+          Next         = "InvokeGitHubIssueLambda"
         }]
         Default = "NoChangeNeeded"
       }
