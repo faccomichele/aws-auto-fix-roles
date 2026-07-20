@@ -222,12 +222,12 @@ resource "aws_sfn_state_machine" "auto_fix" {
 
       # ── Step 2: branch on whether the auto-fix Lambda took any action ─────
       CheckAutoFixResult = {
-        Type = "Choice"
+        Type          = "Choice"
+        QueryLanguage = "JSONata"
         Choices = [{
           # Notify GitHub only when a new inline policy was created.
-          Variable     = "$.auto_fix_result.Payload.actions_taken[0]"
-          StringEquals = "inline_policy_created"
-          Next         = "InvokeGitHubIssueLambda"
+          Condition = "{% $.auto_fix_result.Payload.actions_taken[0] = 'inline_policy_created' %}"
+          Next      = "InvokeGitHubIssueLambda"
         }]
         Default = "NoChangeNeeded"
       }
