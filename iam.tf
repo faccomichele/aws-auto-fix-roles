@@ -40,20 +40,15 @@ resource "aws_iam_role_policy" "lambda_auto_fix" {
         Resource = "${aws_cloudwatch_log_group.auto_fix.arn}:*"
       },
       {
-        Sid    = "AllowGetRole"
+        Sid    = "AllowIAMRolePolicyManagement"
         Effect = "Allow"
         Action = [
           "iam:GetRole",
           "iam:ListRolePolicies",
-          "iam:GetRolePolicy"
+          "iam:GetRolePolicy",
+          "iam:PutRolePolicy"
         ]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
-      },
-      {
-        Sid      = "AllowCreateAndUpdateInlinePolicies"
-        Effect   = "Allow"
-        Action   = ["iam:PutRolePolicy"]
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*/policy/auto-correction-*"
       },
       {
         Sid    = "AllowSSMAutoFixParameters"
