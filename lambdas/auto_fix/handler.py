@@ -199,9 +199,13 @@ def _build_iam_action(event_source: str, event_name: str) -> str:
     """Convert a CloudTrail ``eventSource`` + ``eventName`` into an IAM action string."""
     if not event_source or not event_name:
         return ""
+
+    # CloudTrail often appends a version/date suffix to API names, such as
+    # ``UntagResource2020_05_31`` or ``PutObject20240101``.
+    normalized_event_name = re.sub(r"(?:\d{8}|\d{4}_\d{2}_\d{2})$", "", event_name)
+
     # e.g. "s3.amazonaws.com" -> "s3", then "s3:PutObject"
     service = event_source.split(".")[0]
-    normalized_event_name = re.sub(r"\d{8}$", "", event_name)
     return f"{service}:{normalized_event_name}"
 
 

@@ -12,12 +12,10 @@ resource "aws_ssm_parameter" "github_app_client_id" {
     ignore_changes = [value]
   }
 
-  tags = merge(local.tags,
-    {
-      Name = local.github_app_client_id_ssm_path
-      File = "ssm.tf"
-    }
-  )
+  tags = {
+    Name = local.github_app_client_id_ssm_path
+    RepositoryFile = "ssm.tf"
+  }
 }
 
 resource "aws_ssm_parameter" "github_app_installation_id" {
@@ -30,12 +28,10 @@ resource "aws_ssm_parameter" "github_app_installation_id" {
     ignore_changes = [value]
   }
 
-  tags = merge(local.tags,
-    {
-      Name = local.github_app_installation_id_ssm_path
-      File = "ssm.tf"
-    }
-  )
+  tags = {
+    Name = local.github_app_installation_id_ssm_path
+    RepositoryFile = "ssm.tf"
+  }
 }
 
 resource "aws_ssm_parameter" "github_app_private_key" {
@@ -48,10 +44,8 @@ resource "aws_ssm_parameter" "github_app_private_key" {
     ignore_changes = [value]
   }
 
-  tags = merge(local.tags,
-    {
-      Name = local.github_app_private_key_ssm_path
-      File = "ssm.tf"
-    }
-  )
+  tags = {
+    Name = local.github_app_private_key_ssm_path
+    RepositoryFile = "ssm.tf"
+  }
 }

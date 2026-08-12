@@ -7,6 +7,4 @@ locals {
   github_app_installation_id_ssm_path = "/${local.organization}/${local.project_name}/${local.environment}/github-app-installation-id"
   github_app_private_key_ssm_path     = "/${local.organization}/${local.project_name}/${local.environment}/github-app-private-key"
   python_runtime                      = "python3.13"
-
-  tags = var.tags # No custom tags for now, but this allows to easily add them later on.
 }

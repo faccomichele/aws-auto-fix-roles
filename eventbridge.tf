@@ -17,12 +17,10 @@ resource "aws_cloudwatch_event_rule" "cloudtrail_access_denied" {
     }
   })
 
-  tags = merge(local.tags,
-    {
-      Name = "${local.project_name}-cloudtrail-access-denied-${local.environment}"
-      File = "eventbridge.tf"
-    }
-  )
+  tags = {
+    Name = "${local.project_name}-cloudtrail-access-denied-${local.environment}"
+    RepositoryFile = "eventbridge.tf"
+  }
 }
 
 resource "aws_cloudwatch_event_target" "step_functions" {

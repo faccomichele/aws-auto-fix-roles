@@ -13,10 +13,8 @@ resource "aws_dynamodb_table" "remediation_locks" {
     enabled        = true
   }
 
-  tags = merge(local.tags,
-    {
-      Name = "${local.project_name}-remediation-locks-${local.environment}"
-      File = "dynamodb.tf"
-    }
-  )
+  tags = {
+    Name = "${local.project_name}-remediation-locks-${local.environment}"
+    RepositoryFile = "dynamodb.tf"
+  }
 }
