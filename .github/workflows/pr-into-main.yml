@@ -35,7 +35,6 @@ jobs:
   
   dev:
     needs: build
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "[DEV - ${{ matrix.environment_prefix }}]"
     strategy:
       matrix:

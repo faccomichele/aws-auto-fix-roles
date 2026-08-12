@@ -6,12 +6,10 @@ resource "aws_s3_bucket" "cloudtrail" {
   bucket        = "${local.project_name}-cloudtrail-${local.environment}-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
 
-  tags = merge(local.tags,
-    {
-      Name = "${local.project_name}-cloudtrail-${local.environment}"
-      File = "cloudtrail.tf"
-    }
-  )
+  tags = {
+    Name = "${local.project_name}-cloudtrail-${local.environment}"
+    RepositoryFile = "cloudtrail.tf"
+  }
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
@@ -90,12 +88,10 @@ resource "aws_cloudtrail" "main" {
     include_management_events = true
   }
 
-  tags = merge(local.tags,
-    {
-      Name = "${local.project_name}-cloudtrail-${local.environment}"
-      File = "cloudtrail.tf"
-    }
-  )
+  tags = {
+    Name = "${local.project_name}-cloudtrail-${local.environment}"
+    RepositoryFile = "cloudtrail.tf"
+  }
 
   depends_on = [aws_s3_bucket_policy.cloudtrail]
 }

@@ -247,10 +247,8 @@ resource "aws_sfn_state_machine" "auto_fix" {
     }
   })
 
-  tags = merge(local.tags,
-    {
-      Name = "${local.project_name}-state-machine-${local.environment}"
-      File = "step_functions.tf"
-    }
-  )
+  tags = {
+    Name = "${local.project_name}-state-machine-${local.environment}"
+    RepositoryFile = "step_functions.tf"
+  }
 }

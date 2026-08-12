@@ -1,12 +1,10 @@
 resource "aws_sns_topic" "sfn_failures" {
   name = "${local.project_name}-sfn-failures-${local.environment}"
 
-  tags = merge(local.tags,
-    {
-      Name = "${local.project_name}-sfn-failures-${local.environment}"
-      File = "step_functions.tf"
-    }
-  )
+  tags = {
+    Name = "${local.project_name}-sfn-failures-${local.environment}"
+    RepositoryFile = "step_functions.tf"
+  }
 }
 
 resource "aws_sns_topic_subscription" "sfn_failures_email" {

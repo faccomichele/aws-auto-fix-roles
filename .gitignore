@@ -32,6 +32,7 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+s3backend.tf
 
 # Ignore transient lock info files created by terraform apply
 .terraform.tfstate.lock.info
@@ -52,3 +53,7 @@ terraform.rc
 # Optional: ignore plan files saved before destroying Terraform configuration
 # Uncomment the line below if you want to ignore planout files.
 # planout
+local.md
+.secrets
+.vars
+.actrc
